@@ -1,3 +1,4 @@
+import os
 import fitz  # PyMuPDF
 import chromadb
 from chromadb.utils import embedding_functions
@@ -26,12 +27,13 @@ def index_pdf(pdf_path: str) -> int:
     doc = fitz.open(pdf_path)
     collection = _get_collection()
 
+    filename = os.path.splitext(os.path.basename(pdf_path))[0]
     ids, documents, metadatas = [], [], []
     for page_num, page in enumerate(doc, start=1):
         text = page.get_text("text").strip()
         if not text:
             continue
-        ids.append(f"slide_{page_num}")
+        ids.append(f"{filename}_p{page_num}")
         documents.append(text)
         metadatas.append({"slide": page_num, "source": pdf_path})
 

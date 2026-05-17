@@ -5,3 +5,4 @@ __pycache__/
 *.pyc
 exam_output.docx
 answer_key.docx
+lecture/

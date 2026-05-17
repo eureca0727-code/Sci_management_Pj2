@@ -19,6 +19,21 @@ def run_blueprint(state: ExamState) -> dict:
 
     logger.log("Chair", f"관련 슬라이드 {len(slides)}개 검색 완료 → LLM 블루프린트 생성 중...")
 
+    user_topics = req.get("user_topics")
+    if user_topics:
+        constraint_text = (
+            "\n\n[사용자 지정 단원 구성 — 반드시 준수]\n"
+            + json.dumps(user_topics, ensure_ascii=False)
+            + "\n위 단원명과 concept_questions/case_questions 수를 그대로 사용하십시오."
+            " slides 범위·weight·difficulty만 강의자료에서 추론하십시오."
+        )
+    else:
+        constraint_text = ""
+
+    additional = req.get("additional_requirements")
+    if additional:
+        constraint_text += f"\n\n[추가 요구사항 — 반드시 반영]\n{additional}"
+
     response = _client.messages.create(
         model=config.MODEL,
         max_tokens=1500,
@@ -28,6 +43,7 @@ def run_blueprint(state: ExamState) -> dict:
             "content": (
                 f"강의자료 발췌:\n{context}\n\n"
                 f"출제 요구사항:\n{json.dumps(req, ensure_ascii=False)}"
+                + constraint_text
             ),
         }],
     )

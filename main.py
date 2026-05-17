@@ -1,10 +1,13 @@
 """
 실행 예시:
-  python main.py --pdf lecture.pdf --concept 0.6 --total 100
+  python main.py                              ← 인터랙티브 모드 (권장)
+  python main.py --pdf lecture --total 100    ← CLI 모드
+  python main.py --pdf lecture --total 100 --topic 3장:2:1 --topic 5장:1:2
 """
 
 import argparse
 import os
+import sys
 from graph import build_graph
 from state import ExamState
 import logger
@@ -12,27 +15,43 @@ import logger
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--pdf", required=True, help="강의자료 PDF 경로")
+    p.add_argument("--pdf", help="강의자료 PDF 경로 또는 폴더 경로")
     p.add_argument("--total", type=int, default=100, help="총 배점")
-    p.add_argument("--concept", type=float, default=0.5,
-                   help="개념 문제 비율 (0~1)")
+    p.add_argument("--concept", type=float, default=0.5, help="개념 문제 비율 (0~1)")
     p.add_argument("--questions", type=int, default=10, help="총 문제 수")
+    p.add_argument("--topic", action="append", dest="topics",
+                   metavar="단원명:개념:사례",
+                   help="단원별 문제 수 지정 (반복 사용 가능). 예: --topic 3장:2:1")
     return p.parse_args()
 
 
-def main():
-    args = parse_args()
+def parse_topics(raw_topics: list[str]) -> list[dict]:
+    result = []
+    for t in raw_topics:
+        parts = t.split(":")
+        if len(parts) != 3:
+            raise ValueError(
+                f"--topic 형식 오류: '{t}'\n올바른 형식: 단원명:개념문제수:사례문제수  (예: 3장:2:1)"
+            )
+        result.append({
+            "name": parts[0],
+            "concept_questions": int(parts[1]),
+            "case_questions": int(parts[2]),
+        })
+    return result
 
-    if not os.path.exists(args.pdf):
-        raise FileNotFoundError(f"PDF 파일을 찾을 수 없음: {args.pdf}")
 
-    initial_state: ExamState = {
-        "pdf_path": args.pdf,
+def build_state(pdf_path: str, total_score: int, total_questions: int,
+                concept_ratio: float, user_topics, additional_requirements) -> ExamState:
+    return {
+        "pdf_path": pdf_path,
         "requirements": {
-            "total_score": args.total,
-            "concept_ratio": args.concept,
-            "case_ratio": 1 - args.concept,
-            "total_questions": args.questions,
+            "total_score": total_score,
+            "concept_ratio": concept_ratio,
+            "case_ratio": 1 - concept_ratio,
+            "total_questions": total_questions,
+            "user_topics": user_topics,
+            "additional_requirements": additional_requirements,
         },
         "blueprint": None,
         "questions": [],
@@ -48,6 +67,47 @@ def main():
         "failure_patterns": [],
         "output_path": None,
     }
+
+
+def main():
+    args = parse_args()
+
+    # ── 인터랙티브 모드: --pdf 없이 실행 ──────────────────
+    if not args.pdf:
+        from interactive import run_wizard
+        cfg = run_wizard(pdf_folder="lecture")
+        initial_state = build_state(
+            pdf_path=cfg["pdf_folder"],
+            total_score=cfg["total_score"],
+            total_questions=cfg["total_questions"],
+            concept_ratio=cfg["concept_ratio"],
+            user_topics=cfg["user_topics"],
+            additional_requirements=cfg["additional_requirements"],
+        )
+
+    # ── CLI 모드: --pdf 지정 ──────────────────────────────
+    else:
+        if not os.path.exists(args.pdf):
+            raise FileNotFoundError(f"경로를 찾을 수 없음: {args.pdf}")
+
+        user_topics = None
+        if args.topics:
+            user_topics = parse_topics(args.topics)
+            total_q = sum(t["concept_questions"] + t["case_questions"] for t in user_topics)
+            total_concept = sum(t["concept_questions"] for t in user_topics)
+            concept_ratio = total_concept / total_q if total_q else 0.5
+        else:
+            total_q = args.questions
+            concept_ratio = args.concept
+
+        initial_state = build_state(
+            pdf_path=args.pdf,
+            total_score=args.total,
+            total_questions=total_q,
+            concept_ratio=concept_ratio,
+            user_topics=user_topics,
+            additional_requirements=None,
+        )
 
     app = build_graph()
     final_state = app.invoke(initial_state)
