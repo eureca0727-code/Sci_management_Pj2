@@ -83,13 +83,22 @@ def run(state: ExamState) -> dict:
             pattern = f"{q['type']}:{q['topic']}:{result['failure_reason']}"
             new_failure_patterns.append(pattern)
 
-    logger.log("Judge", f"✅ 판정 완료 — PASS {len(passed)}개 / FAIL {len(failed)}개")
+    # 이전 라운드에서 통과한 문제를 유지 (재출제 시 누적)
+    current_ids = {q["id"] for q in questions}
+    previously_passed = [
+        q for q in state.get("passed_questions", [])
+        if q["id"] not in current_ids
+    ]
+    all_passed = previously_passed + passed
+
+    logger.log("Judge", f"✅ 판정 완료 — PASS {len(passed)}개 / FAIL {len(failed)}개"
+                        + (f" (누적 통과: {len(all_passed)}개)" if previously_passed else ""))
     if failed:
         logger.log("Judge", f"⚠️  실패 문제: {[q['id'] for q in failed]} → 재출제 예정")
 
     return {
         "judge_results": results,
-        "passed_questions": passed,
+        "passed_questions": all_passed,
         "failed_questions": failed,
         "failure_patterns": new_failure_patterns,
     }

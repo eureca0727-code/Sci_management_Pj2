@@ -91,7 +91,14 @@ def run(state: ExamState) -> dict:
 
     logger.log("Student", f"✅ 풀이 완료: grounded {len(grounded_solutions)}건 / unrestricted {len(unrestricted_solutions)}건")
 
+    # 재출제 시 이전 통과 문제의 풀이 기록 보존
+    current_ids = {q["id"] for q in questions}
+    prev_grounded = [s for s in state.get("grounded_solutions", [])
+                     if s["question_id"] not in current_ids]
+    prev_unrestricted = [s for s in state.get("unrestricted_solutions", [])
+                         if s["question_id"] not in current_ids]
+
     return {
-        "grounded_solutions": grounded_solutions,
-        "unrestricted_solutions": unrestricted_solutions,
+        "grounded_solutions": prev_grounded + grounded_solutions,
+        "unrestricted_solutions": prev_unrestricted + unrestricted_solutions,
     }
