@@ -1,4 +1,7 @@
 import os
+import json
+
+_SETTINGS_FILE = ".cache/last_settings.json"
 
 
 def _input(prompt: str) -> str:
@@ -9,6 +12,37 @@ def scan_pdfs(folder: str) -> list[str]:
     if not os.path.isdir(folder):
         return []
     return sorted(f for f in os.listdir(folder) if f.lower().endswith(".pdf"))
+
+
+def save_settings(cfg: dict):
+    os.makedirs(".cache", exist_ok=True)
+    with open(_SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+
+def load_settings() -> dict | None:
+    if not os.path.exists(_SETTINGS_FILE):
+        return None
+    try:
+        with open(_SETTINGS_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _show_settings(cfg: dict, pdf_folder: str, pdfs: list[str]):
+    print(f"강의 폴더   : {pdf_folder}/  ({len(pdfs)}개 파일)")
+    print(f"총 배점     : {cfg['total_score']}점")
+    print(f"총 문제 수  : {cfg['total_questions']}문제")
+    if cfg.get("user_topics"):
+        print("단원 구성   :")
+        for t in cfg["user_topics"]:
+            print(f"  · {t['name']} — 개념 {t['concept_questions']}문제 / 사례 {t['case_questions']}문제")
+    else:
+        cr = cfg["concept_ratio"]
+        print(f"문제 비율   : 개념 {cr:.0%} / 사례 {1 - cr:.0%}")
+    if cfg.get("additional_requirements"):
+        print(f"추가 요구사항: {cfg['additional_requirements']}")
 
 
 def run_wizard(pdf_folder: str = "lecture") -> dict:
@@ -30,12 +64,23 @@ def run_wizard(pdf_folder: str = "lecture") -> dict:
         print(f"  {i}. {f}")
     print(f"\n위 {len(pdfs)}개 파일 전체가 강의 자료로 사용됩니다.")
 
-    # ── 2. 배점 ──────────────────────────────────────────
+    # ── 2. 이전 설정 재사용 여부 ─────────────────────────
+    prev = load_settings()
+    if prev:
+        print("\n[이전 설정이 있습니다]")
+        _show_settings(prev, pdf_folder, pdfs)
+        ans = _input("\n이 설정을 그대로 사용하시겠습니까? (y/n): ").lower()
+        if ans == "y":
+            print("\n이전 설정으로 문제 생성을 시작합니다...\n")
+            prev["pdf_folder"] = pdf_folder
+            return prev
+
+    # ── 3. 배점 ──────────────────────────────────────────
     print("\n[기본 설정]")
     raw = _input("총 배점을 입력하세요 (기본값 100): ")
     total_score = int(raw) if raw else 100
 
-    # ── 3. 단원별 문제 수 ────────────────────────────────
+    # ── 4. 단원별 문제 수 ────────────────────────────────
     print("\n[단원별 문제 수]")
     print("단원을 직접 지정하시겠습니까? (y/n, 기본값 n)")
     print("  y → 단원명·개념문제수·사례문제수 직접 입력")
@@ -83,37 +128,17 @@ def run_wizard(pdf_folder: str = "lecture") -> dict:
         raw = _input("개념 문제 비율 0~1 (기본값 0.5): ")
         concept_ratio = float(raw) if raw else 0.5
 
-    # ── 4. 추가 요구사항 ─────────────────────────────────
+    # ── 5. 추가 요구사항 ─────────────────────────────────
     print("\n[추가 요구사항]")
     print("추가로 반영할 사항이 있으면 입력하세요. (없으면 Enter)")
     print("예: '서술형만 출제', '영어 용어 반드시 포함', '난이도 높게'")
     additional = _input("> ")
 
-    # ── 5. 최종 확인 ─────────────────────────────────────
+    # ── 6. 최종 확인 ─────────────────────────────────────
     print("\n" + "=" * 52)
     print("  [설정 확인]")
     print("=" * 52)
-    print(f"강의 폴더   : {pdf_folder}/  ({len(pdfs)}개 파일)")
-    print(f"총 배점     : {total_score}점")
-    print(f"총 문제 수  : {total_questions}문제")
-    if user_topics:
-        print("단원 구성   :")
-        for t in user_topics:
-            print(f"  · {t['name']} — 개념 {t['concept_questions']}문제 / 사례 {t['case_questions']}문제")
-    else:
-        print(f"문제 비율   : 개념 {concept_ratio:.0%} / 사례 {1 - concept_ratio:.0%}")
-    if additional:
-        print(f"추가 요구사항: {additional}")
-    print("=" * 52)
-
-    confirm = _input("\n위 설정으로 문제 생성을 시작하시겠습니까? (y/n): ").lower()
-    if confirm != "y":
-        print("취소되었습니다.")
-        raise SystemExit(0)
-
-    print("\n문제 생성을 시작합니다...\n")
-
-    return {
+    cfg = {
         "pdf_folder": pdf_folder,
         "total_score": total_score,
         "total_questions": total_questions,
@@ -121,3 +146,14 @@ def run_wizard(pdf_folder: str = "lecture") -> dict:
         "user_topics": user_topics,
         "additional_requirements": additional if additional else None,
     }
+    _show_settings(cfg, pdf_folder, pdfs)
+    print("=" * 52)
+
+    confirm = _input("\n위 설정으로 문제 생성을 시작하시겠습니까? (y/n): ").lower()
+    if confirm != "y":
+        print("취소되었습니다.")
+        raise SystemExit(0)
+
+    save_settings(cfg)
+    print("\n문제 생성을 시작합니다...\n")
+    return cfg

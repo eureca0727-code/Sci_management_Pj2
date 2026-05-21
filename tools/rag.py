@@ -1,9 +1,14 @@
 import os
+import base64
 import fitz  # PyMuPDF
 import chromadb
+import anthropic
 from chromadb.utils import embedding_functions
 from typing import List, Tuple
 import config
+import logger
+
+_llm = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
 
 _client: chromadb.Client = None
@@ -55,6 +60,36 @@ def _split_into_chunks(text: str, chunk_size: int) -> List[str]:
     return chunks or [text]
 
 
+def _describe_image_page(page, page_num: int) -> str:
+    """이미지 슬라이드를 Claude Vision으로 설명 텍스트 추출."""
+    pixmap = page.get_pixmap(dpi=150)
+    img_b64 = base64.standard_b64encode(pixmap.tobytes("png")).decode()
+
+    response = _llm.messages.create(
+        model=config.MODEL,
+        max_tokens=500,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/png", "data": img_b64},
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        "이 강의 슬라이드의 내용을 설명하세요. "
+                        "다이어그램, 도표, 핵심 개념, 텍스트를 모두 포함해 "
+                        "강의 내용을 이해할 수 있도록 서술하세요."
+                    ),
+                },
+            ],
+        }],
+    )
+    logger.record_tokens("Indexer", response.usage)
+    return response.content[0].text.strip()
+
+
 def index_pdf(pdf_path: str) -> int:
     """PDF를 CHUNK_SIZE 단위로 청킹해 ChromaDB에 저장. 저장된 청크 수 반환."""
     doc = fitz.open(pdf_path)
@@ -64,8 +99,12 @@ def index_pdf(pdf_path: str) -> int:
     ids, documents, metadatas = [], [], []
     for page_num, page in enumerate(doc, start=1):
         text = _extract_text(page)
+
         if not text:
-            continue
+            # 이미지 슬라이드 → Vision으로 설명 추출
+            text = _describe_image_page(page, page_num)
+            if not text:
+                continue
 
         chunks = _split_into_chunks(text, config.CHUNK_SIZE)
         for i, chunk in enumerate(chunks):
@@ -78,6 +117,17 @@ def index_pdf(pdf_path: str) -> int:
 
     doc.close()
     return len(ids)
+
+
+def is_indexed(pdf_path: str) -> bool:
+    """PDF가 이미 ChromaDB에 인덱싱되어 있는지 확인."""
+    collection = _get_collection()
+    results = collection.get(
+        where={"source": pdf_path},
+        limit=1,
+        include=[],
+    )
+    return len(results["ids"]) > 0
 
 
 def retrieve(query: str, top_k: int = config.TOP_K) -> List[Tuple[int, str]]:
@@ -101,9 +151,11 @@ def format_context(slides: List[Tuple[int, str]]) -> str:
 
 def get_slides_by_numbers(slide_numbers: List[int]) -> List[Tuple[int, str]]:
     """슬라이드 번호 목록으로 직접 조회."""
+    if not slide_numbers:
+        return []
     collection = _get_collection()
     results = collection.get(
-        where={"slide": {"$in": slide_numbers}},
+        where={"slide": {"$in": [int(n) for n in slide_numbers]}},
         include=["documents", "metadatas"],
     )
     return [

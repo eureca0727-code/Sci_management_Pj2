@@ -4,13 +4,16 @@ import anthropic
 from state import ExamState, Question, StudentSolution
 from prompts.templates import ANSWER_GENERATOR
 from tools.rag import get_slides_by_numbers, format_context
+from utils import parse_json, cached_create
 import config
 import logger
 
 _client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
 
-def _best_grounded(solutions: list[StudentSolution]) -> StudentSolution:
+def _best_grounded(solutions: list[StudentSolution]) -> StudentSolution | None:
+    if not solutions:
+        return None
     valid = [s for s in solutions if not s["insufficient"]]
     if not valid:
         return solutions[0]
@@ -29,27 +32,31 @@ def run(state: ExamState) -> dict:
     for q in passed:
         logger.log("AnswerGen", f"[{q['id']}] 모범답안 생성 중...")
         best = _best_grounded(grounded_map[q["id"]])
-        slides = get_slides_by_numbers(q["source_slides"])
+        best_answer_text = best["answer"][:400] if best else "(학생 풀이 없음)"
+        slides = get_slides_by_numbers(q.get("source_slides", []))
         slide_text = format_context(slides)
 
-        response = _client.messages.create(
+        response = cached_create(
+            _client,
             model=config.MODEL,
-            max_tokens=1200,
+            max_tokens=2000,
             messages=[{
                 "role": "user",
                 "content": ANSWER_GENERATOR.format(
-                    question=q["content"],
-                    intended_answer=q["intended_answer"],
-                    best_student_answer=best["answer"][:400],
+                    question=q.get("content", ""),
+                    intended_answer=q.get("intended_answer", ""),
+                    best_student_answer=best_answer_text,
                     slide_excerpts=slide_text,
                 ),
             }],
         )
 
         logger.record_tokens("AnswerGen", response.usage)
-        raw = json.loads(response.content[0].text)
+        raw = parse_json(response.content[0].text)
+        if not isinstance(raw, dict):
+            raw = {"model_answer": str(raw), "key_concepts": [], "rubric": []}
         raw["question_id"] = q["id"]
-        raw["question_type"] = q["type"]
+        raw["question_type"] = q.get("type", "")
         model_answers.append(raw)
 
         logger.log("AnswerGen", f"  ✅ 루브릭 {len(raw.get('rubric', []))}항목 / "

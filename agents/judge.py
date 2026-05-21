@@ -3,6 +3,7 @@ from collections import defaultdict
 import anthropic
 from state import ExamState, Question, StudentSolution, JudgeResult
 from prompts.templates import JUDGE
+from utils import parse_json, cached_create
 import config
 import logger
 
@@ -19,39 +20,58 @@ def _group_solutions(solutions: list[StudentSolution]) -> dict[str, list[Student
 def _judge_question(
     question: Question,
     grounded: list[StudentSolution],
-    unrestricted: StudentSolution,
 ) -> JudgeResult:
 
-    response = _client.messages.create(
+    response = cached_create(
+        _client,
         model=config.MODEL,
         max_tokens=600,
         messages=[{
             "role": "user",
             "content": JUDGE.format(
-                question_type=question["type"],
-                intended_answer=question["intended_answer"],
-                source_slides=question["source_slides"],
+                question_type=question.get("type", "concept"),
+                intended_answer=question.get("intended_answer", ""),
+                source_slides=question.get("source_slides", []),
                 n=len(grounded),
                 grounded_solutions=json.dumps(
                     [{"run": s["run_index"], "answer": s["answer"][:300],
                       "citations": s["citations"]} for s in grounded],
                     ensure_ascii=False,
                 ),
-                unrestricted_solution=unrestricted["answer"][:300],
             ),
         }],
     )
 
     logger.record_tokens("Judge", response.usage)
-    raw = json.loads(response.content[0].text)
+    raw = parse_json(response.content[0].text)
+    if not isinstance(raw, dict):
+        raw = {}
+
+    q_type = question.get("type", "concept")
+    answer_match       = float(raw.get("answer_match", 0.0))
+    ambiguity_score    = float(raw.get("ambiguity_score", 0.0))
+    lecture_dependency = float(raw.get("lecture_dependency", 0.0))
+    citation_jaccard   = float(raw.get("citation_jaccard", 0.0))
+
+    # 지표가 기준을 충족하면 LLM 판정과 무관하게 pass
+    if q_type == "concept":
+        metrics_pass = (answer_match >= config.CONCEPT_ANSWER_MATCH_MIN
+                        and ambiguity_score <= config.AMBIGUITY_MAX)
+    else:
+        metrics_pass = (answer_match >= config.CASE_ANSWER_MATCH_MIN
+                        and ambiguity_score <= config.AMBIGUITY_MAX)
+
+    llm_passed = bool(raw.get("passed", False))
+    passed = llm_passed or metrics_pass
+
     return JudgeResult(
         question_id=question["id"],
-        passed=raw["passed"],
-        lecture_dependency=raw["lecture_dependency"],
-        citation_jaccard=raw["citation_jaccard"],
-        ambiguity_score=raw["ambiguity_score"],
-        answer_match=raw["answer_match"],
-        failure_reason=raw.get("failure_reason"),
+        passed=passed,
+        lecture_dependency=lecture_dependency,
+        citation_jaccard=citation_jaccard,
+        ambiguity_score=ambiguity_score,
+        answer_match=answer_match,
+        failure_reason=None if passed else raw.get("failure_reason"),
     )
 
 
@@ -59,7 +79,6 @@ def run(state: ExamState) -> dict:
     logger.section("STEP 7 — Judge Evaluation")
     questions = state["questions"]
     grounded_map = _group_solutions(state["grounded_solutions"])
-    unrestricted_map = {s["question_id"]: s for s in state["unrestricted_solutions"]}
 
     results: list[JudgeResult] = []
     passed: list[Question] = []
@@ -67,12 +86,9 @@ def run(state: ExamState) -> dict:
     new_failure_patterns = list(state.get("failure_patterns", []))
 
     for q in questions:
-        logger.log("Judge", f"판정 중: [{q['id']}] {q['content'][:50]}...")
-        result = _judge_question(
-            q,
-            grounded_map[q["id"]],
-            unrestricted_map[q["id"]],
-        )
+        logger.log("Judge", f"판정 중: [{q['id']}] {q.get('content','')[:50]}...")
+        grounded = grounded_map[q["id"]]
+        result = _judge_question(q, grounded)
         results.append(result)
         logger.show_judge(result)
 
@@ -80,7 +96,7 @@ def run(state: ExamState) -> dict:
             passed.append(q)
         else:
             failed.append(q)
-            pattern = f"{q['type']}:{q['topic']}:{result['failure_reason']}"
+            pattern = f"{q.get('type','?')}:{q.get('topic','?')}:{result['failure_reason']}"
             new_failure_patterns.append(pattern)
 
     # 이전 라운드에서 통과한 문제를 유지 (재출제 시 누적)

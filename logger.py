@@ -69,10 +69,12 @@ def section(title: str):
 
 
 def show_question(q: dict):
-    tag = "📘 개념" if q["type"] == "concept" else "📊 사례"
-    print(f"         {tag}  [{q.get('id','?')}]  {q['topic']}  ({q['score']}점)")
-    print(f"         문제: {q['content'][:80]}{'...' if len(q['content'])>80 else ''}")
-    print(f"         근거 슬라이드: {q['source_slides']}")
+    tag = "📘 개념" if q.get("type") == "concept" else "📊 사례"
+    score = q.get("score", "?")
+    slides = q.get("source_slides", [])
+    print(f"         {tag}  [{q.get('id','?')}]  {q.get('topic','?')}  ({score}점)")
+    print(f"         문제: {q.get('content','')[:80]}{'...' if len(q.get('content',''))>80 else ''}")
+    print(f"         근거 슬라이드: {slides}")
 
 
 def show_judge(r: dict):

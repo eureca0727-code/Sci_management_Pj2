@@ -55,6 +55,10 @@ class ExamState(TypedDict):
     # ── 모범답안 (Answer Generator) ───────────────────
     model_answers: List[dict]
 
+    # ── 교수 초안 (Professor Meeting 내부 임시) ───────
+    _draft_a: List[dict]
+    _draft_b: List[dict]
+
     # ── 루프 제어 ─────────────────────────────────────
     retry_count: int
     failure_patterns: List[str]  # 장기 메모리: 실패 패턴 누적

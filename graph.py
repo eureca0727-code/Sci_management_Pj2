@@ -49,13 +49,13 @@ def node_retry_prepare(state: ExamState) -> dict:
         lambda: {"concept_questions": 0, "case_questions": 0}
     )
     for q in failed:
-        if q["type"] == "concept":
-            topic_counts[q["topic"]]["concept_questions"] += 1
+        if q.get("type") == "concept":
+            topic_counts[q.get("topic", "unknown")]["concept_questions"] += 1
         else:
-            topic_counts[q["topic"]]["case_questions"] += 1
+            topic_counts[q.get("topic", "unknown")]["case_questions"] += 1
 
     # 원본 blueprint에서 실패 단원만 추출해 필터링된 blueprint 생성
-    topic_map = {t["name"]: t for t in state["blueprint"]["topics"]}
+    topic_map = {t.get("name", ""): t for t in state["blueprint"].get("topics", [])}
     retry_topics = [
         {**topic_map[name], **counts}
         for name, counts in topic_counts.items()
@@ -64,8 +64,8 @@ def node_retry_prepare(state: ExamState) -> dict:
     filtered_blueprint = {**state["blueprint"], "topics": retry_topics}
 
     for t in retry_topics:
-        logger.log("Graph", f"  재출제: '{t['name']}' — "
-                            f"개념 {t['concept_questions']}개 / 사례 {t['case_questions']}개")
+        logger.log("Graph", f"  재출제: '{t.get('name','?')}' — "
+                            f"개념 {t.get('concept_questions',0)}개 / 사례 {t.get('case_questions',0)}개")
 
     return {
         "retry_count": retries + 1,
@@ -116,15 +116,13 @@ def build_graph() -> StateGraph:
     g.set_entry_point("index")
     g.add_edge("index",       "blueprint")
     g.add_edge("blueprint",   "professor_a")
-    g.add_edge("blueprint",   "professor_b")   # A/B 병렬 실행
-    g.add_edge("professor_a", "consensus")
+    g.add_edge("professor_a", "professor_b")   # A 완료 후 B 순차 실행
     g.add_edge("professor_b", "consensus")
     g.add_edge("consensus",   "student")
     g.add_edge("student",     "judge")
 
-    # 재출제 흐름: retry_prepare → A/B 병렬 → consensus → student → judge
+    # 재출제 흐름: retry_prepare → A → B → consensus → student → judge
     g.add_edge("retry_prepare", "professor_a")
-    g.add_edge("retry_prepare", "professor_b")
 
     # 완료 흐름
     g.add_edge("answer_gen", "compiler")
