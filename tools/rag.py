@@ -130,6 +130,36 @@ def is_indexed(pdf_path: str) -> bool:
     return len(results["ids"]) > 0
 
 
+def get_all_sources() -> List[str]:
+    """ChromaDB에 인덱싱된 모든 PDF 경로 목록 반환."""
+    collection = _get_collection()
+    results = collection.get(include=["metadatas"])
+    seen, sources = set(), []
+    for meta in results["metadatas"]:
+        src = meta.get("source", "")
+        if src and src not in seen:
+            seen.add(src)
+            sources.append(src)
+    return sorted(sources)
+
+
+def retrieve_per_source(query: str, chunks_per_source: int = 2) -> List[Tuple[int, str]]:
+    """각 PDF 소스마다 chunks_per_source개씩 검색해 전 강의 범위를 균등하게 커버."""
+    collection = _get_collection()
+    sources = get_all_sources()
+    results = []
+    for src in sources:
+        res = collection.query(
+            query_texts=[query],
+            n_results=chunks_per_source,
+            where={"source": src},
+            include=["documents", "metadatas"],
+        )
+        for doc, meta in zip(res["documents"][0], res["metadatas"][0]):
+            results.append((meta["slide"], doc))
+    return results
+
+
 def retrieve(query: str, top_k: int = config.TOP_K) -> List[Tuple[int, str]]:
     """query와 유사한 청크를 반환. [(슬라이드번호, 텍스트), ...]"""
     collection = _get_collection()

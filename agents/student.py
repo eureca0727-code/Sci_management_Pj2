@@ -12,13 +12,15 @@ _client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
 def _solve_grounded(question: Question, run_index: int) -> StudentSolution:
     content = question.get("content", "")
-    slides = retrieve(content, top_k=config.TOP_K)
+    # 검색어: 단원명 우선, 없으면 문제 앞부분 — 시나리오 텍스트보다 정확하게 검색됨
+    search_query = question.get("topic") or content[:100]
+    slides = retrieve(search_query, top_k=config.TOP_K)
     context = format_context(slides)
 
     response = cached_create(
         _client,
         model=config.HAIKU_MODEL,
-        max_tokens=800,
+        max_tokens=1000,
         messages=[{
             "role": "user",
             "content": STUDENT_GROUNDED.format(

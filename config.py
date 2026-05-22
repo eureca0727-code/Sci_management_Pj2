@@ -1,11 +1,10 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()  # .env 파일 자동 로딩
+load_dotenv(override=True)  # .env 파일이 시스템 환경변수보다 우선
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-if not ANTHROPIC_API_KEY:
-    raise ValueError(".env 파일에 ANTHROPIC_API_KEY가 없음")
+# 키 검증은 main.py에서 import 전에 처리 — 여기서 raise 하지 않음
 
 MODEL       = "claude-sonnet-4-6"
 HAIKU_MODEL = "claude-haiku-4-5-20251001"   # 단순 작업 전용

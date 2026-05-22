@@ -32,14 +32,14 @@ def run(state: ExamState) -> dict:
     for q in passed:
         logger.log("AnswerGen", f"[{q['id']}] 모범답안 생성 중...")
         best = _best_grounded(grounded_map[q["id"]])
-        best_answer_text = best["answer"][:400] if best else "(학생 풀이 없음)"
+        best_answer_text = best["answer"][:600] if best else "(학생 풀이 없음)"
         slides = get_slides_by_numbers(q.get("source_slides", []))
         slide_text = format_context(slides)
 
         response = cached_create(
             _client,
             model=config.MODEL,
-            max_tokens=2000,
+            max_tokens=1200,
             messages=[{
                 "role": "user",
                 "content": ANSWER_GENERATOR.format(

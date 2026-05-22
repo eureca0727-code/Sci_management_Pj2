@@ -7,3 +7,5 @@ __pycache__/
 exam_output.docx
 answer_key.docx
 lecture/
+.cache/
+exams/

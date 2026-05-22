@@ -1,7 +1,41 @@
+import os
+import re
+from datetime import datetime
 from docx import Document
 from docx.shared import RGBColor
 from state import ExamState, Question
 import logger
+
+_OUTPUT_DIR = "exams"
+
+_KR_NUM = {
+    "한": 1, "하나": 1, "일": 1,
+    "두": 2, "둘": 2, "이": 2,
+    "세": 3, "셋": 3, "삼": 3,
+    "네": 4, "넷": 4, "사": 4,
+    "다섯": 5, "오": 5,
+    "여섯": 6, "육": 6,
+    "일곱": 7, "칠": 7,
+    "여덟": 8, "팔": 8,
+    "아홉": 9, "구": 9,
+    "열": 10, "십": 10,
+}
+
+
+def _parse_group_config(additional: str):
+    """'N문제씩 짝지어서 M개의 대문제' 패턴 파싱 → (group_size, group_count)."""
+    if not additional or "대문제" not in additional:
+        return None, None
+
+    def _to_int(token: str):
+        return int(token) if token.isdigit() else _KR_NUM.get(token)
+
+    size_m = re.search(r'(\d+|\w+)\s*문제씩', additional)
+    count_m = re.search(r'(\d+|\w+)\s*개(?:의)?\s*대문제', additional)
+
+    group_size  = _to_int(size_m.group(1))  if size_m  else 2
+    group_count = _to_int(count_m.group(1)) if count_m else None
+    return group_size, group_count
 
 
 def _add_heading(doc: Document, text: str, level: int = 1):
@@ -15,27 +49,68 @@ def _build_exam(doc: Document, questions: list[Question], requirements: dict):
     doc.add_paragraph(f"Total: {requirements.get('total_score', 100)} points")
     doc.add_paragraph()
 
-    concept_qs = [q for q in questions if q.get("type") == "concept"]
-    case_qs    = [q for q in questions if q.get("type") == "case"]
+    additional = requirements.get("additional_requirements", "") or ""
+    group_size, group_count = _parse_group_config(additional)
 
-    seq = 1  # sequential display number across both parts
-    if concept_qs:
-        _add_heading(doc, "Part I — Concept Questions")
-        for q in concept_qs:
-            score = q.get("score", "?")
-            doc.add_paragraph(f"[{seq}] ({score}pts)  {q.get('content', '')}",
-                               style="List Number")
-            doc.add_paragraph()
-            seq += 1
+    # 출력 순서: 개념 먼저, 사례 나중
+    ordered = (
+        [q for q in questions if q.get("type") == "concept"] +
+        [q for q in questions if q.get("type") == "case"]
+    )
 
-    if case_qs:
-        _add_heading(doc, "Part II — Case Analysis Questions")
-        for q in case_qs:
-            score = q.get("score", "?")
-            doc.add_paragraph(f"[{seq}] ({score}pts)  {q.get('content', '')}",
-                               style="List Number")
-            doc.add_paragraph()
-            seq += 1
+    if group_size and group_count:
+        # ── 대문제 구조 ───────────────────────────────────────
+        grouped_total = group_size * group_count
+        grouped_qs    = ordered[:grouped_total]
+        standalone_qs = ordered[grouped_total:]
+
+        for g in range(group_count):
+            chunk = grouped_qs[g * group_size:(g + 1) * group_size]
+            if not chunk:
+                break
+            total_score = sum(q.get("score", 0) for q in chunk)
+            _add_heading(doc, f"대문제 {g + 1}  ({total_score}pts)", level=1)
+            for sub_i, q in enumerate(chunk, 1):
+                score = q.get("score", "?")
+                doc.add_paragraph(
+                    f"({sub_i}) ({score}pts)  {q.get('content', '')}",
+                    style="List Number",
+                )
+                doc.add_paragraph()
+
+        if standalone_qs:
+            _add_heading(doc, "추가 문제", level=1)
+            for seq, q in enumerate(standalone_qs, grouped_total + 1):
+                score = q.get("score", "?")
+                doc.add_paragraph(
+                    f"[{seq}] ({score}pts)  {q.get('content', '')}",
+                    style="List Number",
+                )
+                doc.add_paragraph()
+
+    else:
+        # ── 기본 구조 (파트 I / II) ───────────────────────────
+        concept_qs = [q for q in ordered if q.get("type") == "concept"]
+        case_qs    = [q for q in ordered if q.get("type") == "case"]
+        seq = 1
+
+        if concept_qs:
+            _add_heading(doc, "Part I — Concept Questions")
+            for q in concept_qs:
+                score = q.get("score", "?")
+                doc.add_paragraph(f"[{seq}] ({score}pts)  {q.get('content', '')}",
+                                   style="List Number")
+                doc.add_paragraph()
+                seq += 1
+
+        if case_qs:
+            _add_heading(doc, "Part II — Case Analysis Questions")
+            for q in case_qs:
+                score = q.get("score", "?")
+                doc.add_paragraph(f"[{seq}] ({score}pts)  {q.get('content', '')}",
+                                   style="List Number")
+                doc.add_paragraph()
+                seq += 1
 
 
 def _build_answer_key(doc: Document, model_answers: list[dict],
@@ -91,15 +166,18 @@ def run(state: ExamState) -> dict:
     case_count    = sum(1 for q in passed if q.get("type") == "case")
     logger.log("Compiler", f"개념 {concept_count}문항 + 사례 {case_count}문항 → DOCX 생성 중...")
 
+    os.makedirs(_OUTPUT_DIR, exist_ok=True)
+    ts = datetime.now().strftime("%m%d_%H%M")
+
     exam_doc = Document()
     _build_exam(exam_doc, passed, requirements)
-    exam_path = "exam_output.docx"
+    exam_path = os.path.join(_OUTPUT_DIR, f"exam_{ts}.docx")
     exam_doc.save(exam_path)
     logger.log("Compiler", f"✅ 시험지 저장: {exam_path}")
 
     answer_doc = Document()
     _build_answer_key(answer_doc, model_answers, passed)
-    answer_path = "answer_key.docx"
+    answer_path = os.path.join(_OUTPUT_DIR, f"answer_key_{ts}.docx")
     answer_doc.save(answer_path)
     logger.log("Compiler", f"✅ 모범답안 저장: {answer_path}")
 

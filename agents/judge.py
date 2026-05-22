@@ -25,7 +25,7 @@ def _judge_question(
     response = cached_create(
         _client,
         model=config.MODEL,
-        max_tokens=600,
+        max_tokens=1000,
         messages=[{
             "role": "user",
             "content": JUDGE.format(
@@ -34,7 +34,7 @@ def _judge_question(
                 source_slides=question.get("source_slides", []),
                 n=len(grounded),
                 grounded_solutions=json.dumps(
-                    [{"run": s["run_index"], "answer": s["answer"][:300],
+                    [{"run": s["run_index"], "answer": s["answer"][:2000],
                       "citations": s["citations"]} for s in grounded],
                     ensure_ascii=False,
                 ),

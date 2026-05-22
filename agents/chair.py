@@ -2,7 +2,7 @@ import json
 import anthropic
 from state import ExamState, Question
 from prompts.templates import CHAIR_BLUEPRINT, CHAIR_CONSENSUS
-from tools.rag import retrieve, format_context
+from tools.rag import retrieve, retrieve_per_source, format_context
 from utils import parse_json, cached_create
 import config
 import logger
@@ -15,10 +15,10 @@ def run_blueprint(state: ExamState) -> dict:
     logger.log("Chair", "강의자료 분석 중...")
 
     req = state["requirements"]
-    slides = retrieve("목차 단원 주요 개념", top_k=10)
+    slides = retrieve_per_source("목차 단원 주요 개념 핵심 내용", chunks_per_source=2)
     context = format_context(slides)
 
-    logger.log("Chair", f"관련 슬라이드 {len(slides)}개 검색 완료 → LLM 블루프린트 생성 중...")
+    logger.log("Chair", f"전체 PDF {len(set(s for s,_ in slides))}개 소스 × 2청크 = {len(slides)}개 슬라이드 검색 완료 → LLM 블루프린트 생성 중...")
 
     user_topics = req.get("user_topics")
     if user_topics:
