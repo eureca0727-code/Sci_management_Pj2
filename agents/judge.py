@@ -109,8 +109,11 @@ def run(state: ExamState) -> dict:
 
     logger.log("Judge", f"✅ 판정 완료 — PASS {len(passed)}개 / FAIL {len(failed)}개"
                         + (f" (누적 통과: {len(all_passed)}개)" if previously_passed else ""))
-    if failed:
-        logger.log("Judge", f"⚠️  실패 문제: {[q['id'] for q in failed]} → 재출제 예정")
+  retries = state.get("retry_count", 0)
+  if failed and retries < config.MAX_RETRIES:
+      logger.log("Judge", f"⚠️  실패 문제: {[q['id'] for q in failed]} → 재출제 예정")
+  elif failed:
+      logger.log("Judge", f"⚠️  실패 문제: {[q['id'] for q in failed]} → 최대 재출제 횟수 도달, 통과 문제만으로 진행")
 
     return {
         "judge_results": results,
