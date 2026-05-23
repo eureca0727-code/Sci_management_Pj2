@@ -36,30 +36,58 @@ def node_judge(state: ExamState) -> dict:
     return judge.run(state)
 
 
+def _find_blueprint_topic(failed_q: dict, blueprint_topics: list) -> dict | None:
+    """source_slides 범위로 블루프린트 단원 찾기. 안 되면 topic명 폴백."""
+    source_slides = [int(s) for s in failed_q.get("source_slides", []) if s is not None]
+    if source_slides:
+        for t in blueprint_topics:
+            r = t.get("slides", [])
+            if len(r) >= 2:
+                start, end = int(r[0]), int(r[1])
+                if any(start <= s <= end for s in source_slides):
+                    return t
+    # 폴백: topic명 정확 매칭
+    name = failed_q.get("topic", "")
+    for t in blueprint_topics:
+        if t.get("name", "") == name:
+            return t
+    return None
+
+
 def node_retry_prepare(state: ExamState) -> dict:
     """재출제 전 상태 정리 + 실패 문제 기반 blueprint 필터링."""
     retries = state.get("retry_count", 0)
     failed = state.get("failed_questions", [])
+    blueprint_topics = state["blueprint"].get("topics", [])
 
     logger.section(f"RETRY {retries + 1}/{config.MAX_RETRIES} — 재출제 준비")
     logger.log("Graph", f"실패 문제 {len(failed)}개 → 해당 단원만 재출제")
 
-    # 실패 문제에서 단원별 재출제 수량 집계
+    # source_slides 기준으로 블루프린트 단원 찾아 재출제 수량 집계
     topic_counts: dict[str, dict] = defaultdict(
         lambda: {"concept_questions": 0, "case_questions": 0}
     )
-    for q in failed:
-        if q.get("type") == "concept":
-            topic_counts[q.get("topic", "unknown")]["concept_questions"] += 1
-        else:
-            topic_counts[q.get("topic", "unknown")]["case_questions"] += 1
+    topic_by_name: dict[str, dict] = {}
+    unmatched = []
 
-    # 원본 blueprint에서 실패 단원만 추출해 필터링된 blueprint 생성
-    topic_map = {t.get("name", ""): t for t in state["blueprint"].get("topics", [])}
+    for q in failed:
+        matched = _find_blueprint_topic(q, blueprint_topics)
+        if matched is None:
+            unmatched.append(q.get("id", "?"))
+            continue
+        name = matched["name"]
+        topic_by_name[name] = matched
+        if q.get("type") == "concept":
+            topic_counts[name]["concept_questions"] += 1
+        else:
+            topic_counts[name]["case_questions"] += 1
+
+    if unmatched:
+        logger.log("Graph", f"  ⚠️  블루프린트 매칭 실패 (건너뜀): {unmatched}")
+
     retry_topics = [
-        {**topic_map[name], **counts}
+        {**topic_by_name[name], **counts}
         for name, counts in topic_counts.items()
-        if name in topic_map
     ]
     filtered_blueprint = {**state["blueprint"], "topics": retry_topics}
 
