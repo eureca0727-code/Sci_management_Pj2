@@ -82,6 +82,7 @@ def build_state(pdf_path: str, total_score: int, total_questions: int,
         "failure_patterns": [],
         "fill_count": 0,
         "_accepted_questions": [],
+        "question_fail_counts": {},
         "output_path": None,
     }
 

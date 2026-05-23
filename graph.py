@@ -55,13 +55,34 @@ def _find_blueprint_topic(failed_q: dict, blueprint_topics: list) -> dict | None
 
 
 def node_retry_prepare(state: ExamState) -> dict:
-    """재출제 전 상태 정리 + 실패 문제 기반 blueprint 필터링."""
+    """재출제 전 상태 정리 + 실패 문제 기반 blueprint 필터링 (문제별 횟수 추적)."""
     retries = state.get("retry_count", 0)
     failed = state.get("failed_questions", [])
     blueprint_topics = state["blueprint"].get("topics", [])
+    fail_counts = dict(state.get("question_fail_counts", {}))
 
-    logger.section(f"RETRY {retries + 1}/{config.MAX_RETRIES} — 재출제 준비")
-    logger.log("Graph", f"실패 문제 {len(failed)}개 → 해당 단원만 재출제")
+    # 실패 횟수 업데이트
+    for q in failed:
+        key = f"{q.get('topic', '')}:{q.get('type', '')}"
+        fail_counts[key] = fail_counts.get(key, 0) + 1
+
+    # 재출제 가능 vs 영구 탈락 분리
+    retryable = []
+    permanent_fail = []
+    for q in failed:
+        key = f"{q.get('topic', '')}:{q.get('type', '')}"
+        if fail_counts[key] <= config.MAX_RETRIES_PER_QUESTION:
+            retryable.append(q)
+        else:
+            permanent_fail.append(q)
+
+    if permanent_fail:
+        logger.log("Graph", f"  ⚠️  최대 재출제 초과 — 영구 탈락: "
+                            f"{[q.get('id', '?') for q in permanent_fail]}")
+
+    logger.section(f"RETRY {retries + 1} — 재출제 준비")
+    logger.log("Graph", f"실패 {len(failed)}개 중 재출제 {len(retryable)}개 / "
+                        f"영구탈락 {len(permanent_fail)}개")
 
     # source_slides 기준으로 블루프린트 단원 찾아 재출제 수량 집계
     topic_counts: dict[str, dict] = defaultdict(
@@ -70,7 +91,7 @@ def node_retry_prepare(state: ExamState) -> dict:
     topic_by_name: dict[str, dict] = {}
     unmatched = []
 
-    for q in failed:
+    for q in retryable:
         matched = _find_blueprint_topic(q, blueprint_topics)
         if matched is None:
             unmatched.append(q.get("id", "?"))
@@ -97,6 +118,7 @@ def node_retry_prepare(state: ExamState) -> dict:
 
     return {
         "retry_count": retries + 1,
+        "question_fail_counts": fail_counts,
         "blueprint": filtered_blueprint,
         "_draft_a": [],
         "_draft_b": [],
@@ -230,10 +252,15 @@ def node_compiler(state: ExamState) -> dict:
 
 def after_judge(state: ExamState) -> str:
     failed = state.get("failed_questions", [])
-    retries = state.get("retry_count", 0)
+    if not failed:
+        return "proceed"
 
-    if failed and retries < config.MAX_RETRIES:
-        return "retry"
+    fail_counts = state.get("question_fail_counts", {})
+    # 재출제 여지가 남은 문제가 하나라도 있으면 재출제
+    for q in failed:
+        key = f"{q.get('topic', '')}:{q.get('type', '')}"
+        if fail_counts.get(key, 0) < config.MAX_RETRIES_PER_QUESTION:
+            return "retry"
     return "proceed"
 
 

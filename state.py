@@ -64,6 +64,7 @@ class ExamState(TypedDict):
     failure_patterns: List[str]  # 장기 메모리: 실패 패턴 누적
     fill_count: int              # Chair 부족분 보충 시도 횟수
     _accepted_questions: List[Question]  # fill 라운드 간 누적 채택 문제
+    question_fail_counts: dict   # {"topic:type": 실패횟수} — 문제별 재출제 횟수 추적
 
     # ── 출력 ──────────────────────────────────────────
     output_path: Optional[str]
