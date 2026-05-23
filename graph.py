@@ -175,6 +175,7 @@ def node_fill_check(state: ExamState) -> dict:
             "_draft_a": [],
             "_draft_b": [],
             "fill_count": state.get("fill_count", 0) + 1,
+             "_needs_fill": True,
         }
 
     # 충분하거나 최대 시도 초과 → 누적 문제로 확정
@@ -184,33 +185,14 @@ def node_fill_check(state: ExamState) -> dict:
     return {
         "_accepted_questions": accumulated,
         "questions": accumulated,
+        "_needs_fill": False,
     }
 
 
 def after_fill_check(state: ExamState) -> str:
-    """fill_count가 증가했으면 다시 professor로, 아니면 student로."""
-    blueprint = state["blueprint"]
-    required = sum(t.get("concept_questions", 0) + t.get("case_questions", 0)
-                   for t in blueprint.get("topics", []))
-    accumulated = state.get("_accepted_questions", [])
-
-    # fill blueprint에 문제가 남아있으면(= 방금 fill_count 증가) 교수에게 재출제
-    if required > 0 and len(accumulated) < (
-        sum(t.get("concept_questions", 0) + t.get("case_questions", 0)
-            for t in state.get("blueprint", {}).get("topics", []))
-        + len(accumulated)
-    ):
-        pass  # 아래 조건으로 판단
-
-    # 간단하게: fill_count 마지막 증가 여부는 blueprint topics 잔여량으로 판단
-    fill_topics = state["blueprint"].get("topics", [])
-    has_fill_work = any(
-        t.get("concept_questions", 0) + t.get("case_questions", 0) > 0
-        for t in fill_topics
-    )
-    if has_fill_work and state.get("fill_count", 0) <= _MAX_FILL:
-        return "fill"
-    return "student"
+    def after_fill_check(state: ExamState) -> str:
+    """fill_check에서 부족분 생성이 필요하다고 표시했으면 다시 professor로."""
+    return "fill" if state.get("_needs_fill", False) else "student"
 
 
 def node_answer_gen(state: ExamState) -> dict:
