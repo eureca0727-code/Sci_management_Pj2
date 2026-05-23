@@ -110,15 +110,12 @@ def run(state: ExamState) -> dict:
     logger.log("Judge", f"✅ 판정 완료 — PASS {len(passed)}개 / FAIL {len(failed)}개"
                         + (f" (누적 통과: {len(all_passed)}개)" if previously_passed else ""))
     if failed:
-        fail_counts = state.get("question_fail_counts", {})
-        retryable = [q for q in failed
-                     if fail_counts.get(f"{q.get('topic','')}:{q.get('type','')}", 0)
-                     < config.MAX_RETRIES_PER_QUESTION]
-        exhausted = [q for q in failed if q not in retryable]
-        if retryable:
-            logger.log("Judge", f"⚠️  실패 문제: {[q['id'] for q in retryable]} → 재출제 예정")
-        if exhausted:
-            logger.log("Judge", f"⚠️  영구 탈락 예정: {[q['id'] for q in exhausted]} (재출제 한도 초과)")
+        retries = state.get("retry_count", 0)
+        if retries < config.MAX_RETRIES:
+            logger.log("Judge", f"⚠️  실패 문제: {[q['id'] for q in failed]} → 재출제 예정 "
+                                f"(재출제 {retries + 1}/{config.MAX_RETRIES})")
+        else:
+            logger.log("Judge", f"⚠️  실패 문제: {[q['id'] for q in failed]} → 최대 재출제 도달, 탈락")
 
     return {
         "judge_results": results,

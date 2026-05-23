@@ -23,4 +23,4 @@ LECTURE_DEPENDENCY_MIN = 0.3  # grounded - unrestricted 정답률 차이 하한
 
 # Student simulation
 STUDENT_RUNS = 1          # 모호성 측정을 위한 반복 풀이 횟수
-MAX_RETRIES_PER_QUESTION = 3  # 문제별 최대 재출제 횟수 (초과 시 해당 문제만 탈락)
+MAX_RETRIES = 10          # 전체 재출제 라운드 최대 횟수 (안전망)
