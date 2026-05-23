@@ -190,7 +190,6 @@ def node_fill_check(state: ExamState) -> dict:
 
 
 def after_fill_check(state: ExamState) -> str:
-    def after_fill_check(state: ExamState) -> str:
     """fill_check에서 부족분 생성이 필요하다고 표시했으면 다시 professor로."""
     return "fill" if state.get("_needs_fill", False) else "student"
 
