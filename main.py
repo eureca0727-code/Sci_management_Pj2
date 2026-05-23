@@ -80,6 +80,8 @@ def build_state(pdf_path: str, total_score: int, total_questions: int,
         "model_answers": [],
         "retry_count": 0,
         "failure_patterns": [],
+        "fill_count": 0,
+        "_accepted_questions": [],
         "output_path": None,
     }
 

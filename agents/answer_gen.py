@@ -55,6 +55,19 @@ def run(state: ExamState) -> dict:
         raw = parse_json(response.content[0].text)
         if not isinstance(raw, dict):
             raw = {"model_answer": str(raw), "key_concepts": [], "rubric": []}
+
+        # 루브릭 합계 ≠ 문제 점수면 비례 보정
+        q_score = q.get("score", 0)
+        rubric = raw.get("rubric", [])
+        rubric_sum = sum(float(item.get("points", 0)) for item in rubric
+                         if isinstance(item, dict))
+        if rubric and rubric_sum > 0 and abs(rubric_sum - q_score) > 0.5:
+            scale = q_score / rubric_sum
+            for item in rubric:
+                if isinstance(item, dict):
+                    item["points"] = round(float(item.get("points", 0)) * scale, 1)
+            logger.log("AnswerGen", f"  ⚠️  루브릭 합계 보정: {rubric_sum:.0f}pt → {q_score}pt")
+
         raw["question_id"] = q["id"]
         raw["question_type"] = q.get("type", "")
         model_answers.append(raw)

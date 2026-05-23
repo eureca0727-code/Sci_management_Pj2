@@ -105,8 +105,121 @@ def node_retry_prepare(state: ExamState) -> dict:
     }
 
 
+_MAX_FILL = 2  # Chair 부족분 보충 최대 시도 횟수
+
+
+def node_fill_check(state: ExamState) -> dict:
+    """Consensus 후 채택 문제 수가 부족하면 fill blueprint 생성."""
+    blueprint = state["blueprint"]
+    required_concept = sum(t.get("concept_questions", 0) for t in blueprint.get("topics", []))
+    required_case    = sum(t.get("case_questions", 0)    for t in blueprint.get("topics", []))
+
+    # 이번 consensus 결과 + 이전 fill 라운드 누적 문제 합산
+    accumulated = list(state.get("_accepted_questions", []))
+    new_questions = [q for q in state.get("questions", [])
+                     if q["id"] not in {a["id"] for a in accumulated}]
+    accumulated = accumulated + new_questions
+
+    current_concept = sum(1 for q in accumulated if q.get("type") == "concept")
+    current_case    = sum(1 for q in accumulated if q.get("type") == "case")
+    short_concept   = max(0, required_concept - current_concept)
+    short_case      = max(0, required_case    - current_case)
+
+    logger.log("Graph", f"[Fill Check] 개념 {current_concept}/{required_concept}  "
+                        f"사례 {current_case}/{required_case}")
+
+    if (short_concept > 0 or short_case > 0) and state.get("fill_count", 0) < _MAX_FILL:
+        # 부족분만 채우는 fill blueprint 생성
+        fill_topics = []
+        for t in blueprint.get("topics", []):
+            need_c = min(t.get("concept_questions", 0),
+                         short_concept) if short_concept > 0 else 0
+            need_s = min(t.get("case_questions", 0),
+                         short_case) if short_case > 0 else 0
+            if need_c > 0 or need_s > 0:
+                fill_topics.append({**t,
+                                    "concept_questions": need_c,
+                                    "case_questions": need_s})
+                short_concept -= need_c
+                short_case    -= need_s
+        fill_blueprint = {**blueprint, "topics": fill_topics}
+        logger.log("Graph", f"  → 부족분 보충: 개념 {sum(t['concept_questions'] for t in fill_topics)}개 "
+                            f"/ 사례 {sum(t['case_questions'] for t in fill_topics)}개  "
+                            f"(fill #{state.get('fill_count', 0) + 1})")
+        return {
+            "_accepted_questions": accumulated,
+            "questions": accumulated,
+            "blueprint": fill_blueprint,
+            "_draft_a": [],
+            "_draft_b": [],
+            "fill_count": state.get("fill_count", 0) + 1,
+        }
+
+    # 충분하거나 최대 시도 초과 → 누적 문제로 확정
+    if short_concept > 0 or short_case > 0:
+        logger.log("Graph", f"  ⚠️  최대 fill 시도 도달 — 부족한 채로 진행 "
+                            f"(개념 {short_concept}개, 사례 {short_case}개 부족)")
+    return {
+        "_accepted_questions": accumulated,
+        "questions": accumulated,
+    }
+
+
+def after_fill_check(state: ExamState) -> str:
+    """fill_count가 증가했으면 다시 professor로, 아니면 student로."""
+    blueprint = state["blueprint"]
+    required = sum(t.get("concept_questions", 0) + t.get("case_questions", 0)
+                   for t in blueprint.get("topics", []))
+    accumulated = state.get("_accepted_questions", [])
+
+    # fill blueprint에 문제가 남아있으면(= 방금 fill_count 증가) 교수에게 재출제
+    if required > 0 and len(accumulated) < (
+        sum(t.get("concept_questions", 0) + t.get("case_questions", 0)
+            for t in state.get("blueprint", {}).get("topics", []))
+        + len(accumulated)
+    ):
+        pass  # 아래 조건으로 판단
+
+    # 간단하게: fill_count 마지막 증가 여부는 blueprint topics 잔여량으로 판단
+    fill_topics = state["blueprint"].get("topics", [])
+    has_fill_work = any(
+        t.get("concept_questions", 0) + t.get("case_questions", 0) > 0
+        for t in fill_topics
+    )
+    if has_fill_work and state.get("fill_count", 0) <= _MAX_FILL:
+        return "fill"
+    return "student"
+
+
 def node_answer_gen(state: ExamState) -> dict:
     return answer_gen.run(state)
+
+
+def node_validate(state: ExamState) -> dict:
+    """Compiler 진입 전 최종 검증 — 경고만 출력하고 진행."""
+    passed   = state.get("passed_questions", [])
+    answers  = {a["question_id"]: a for a in state.get("model_answers", [])}
+    req      = state.get("requirements", {})
+    required_total = req.get("total_questions", len(passed))
+    required_score = req.get("total_score", 100)
+
+    actual_score = sum(q.get("score", 0) for q in passed)
+    missing_answers = [q["id"] for q in passed if q["id"] not in answers]
+
+    logger.section("STEP 8.5 — Pre-Compiler Validation")
+    ok = True
+    if len(passed) != required_total:
+        logger.log("Validate", f"⚠️  문제 수 불일치: {len(passed)}개 (요구 {required_total}개)")
+        ok = False
+    if actual_score != required_score:
+        logger.log("Validate", f"⚠️  총점 불일치: {actual_score}점 (요구 {required_score}점)")
+        ok = False
+    if missing_answers:
+        logger.log("Validate", f"⚠️  모범답안 누락: {missing_answers}")
+        ok = False
+    if ok:
+        logger.log("Validate", "✅ 모든 조건 충족")
+    return {}
 
 
 def node_compiler(state: ExamState) -> dict:
@@ -134,9 +247,11 @@ def build_graph() -> StateGraph:
     g.add_node("professor_a",   node_professor_a)
     g.add_node("professor_b",   node_professor_b)
     g.add_node("consensus",     node_consensus)
+    g.add_node("fill_check",    node_fill_check)
     g.add_node("student",       node_student)
     g.add_node("judge",         node_judge)
     g.add_node("retry_prepare", node_retry_prepare)
+    g.add_node("validate",      node_validate)
     g.add_node("answer_gen",    node_answer_gen)
     g.add_node("compiler",      node_compiler)
 
@@ -144,16 +259,27 @@ def build_graph() -> StateGraph:
     g.set_entry_point("index")
     g.add_edge("index",       "blueprint")
     g.add_edge("blueprint",   "professor_a")
-    g.add_edge("professor_a", "professor_b")   # A 완료 후 B 순차 실행
+    g.add_edge("professor_a", "professor_b")
     g.add_edge("professor_b", "consensus")
-    g.add_edge("consensus",   "student")
+    g.add_edge("consensus",   "fill_check")
     g.add_edge("student",     "judge")
 
-    # 재출제 흐름: retry_prepare → A → B → consensus → student → judge
+    # fill_check 조건부 엣지: 부족하면 교수 재출제, 충분하면 학생으로
+    g.add_conditional_edges(
+        "fill_check",
+        after_fill_check,
+        {
+            "fill":    "professor_a",
+            "student": "student",
+        },
+    )
+
+    # Judge 재출제 흐름
     g.add_edge("retry_prepare", "professor_a")
 
     # 완료 흐름
-    g.add_edge("answer_gen", "compiler")
+    g.add_edge("answer_gen", "validate")
+    g.add_edge("validate",   "compiler")
     g.add_edge("compiler",   END)
 
     # 조건부 엣지
