@@ -364,6 +364,7 @@ def build_graph() -> StateGraph:
     g.add_node("student",       node_student)
     g.add_node("judge",         node_judge)
     g.add_node("retry_prepare", node_retry_prepare)
+    g.add_node("score_normalize", node_score_normalize)
     g.add_node("validate",      node_validate)
     g.add_node("answer_gen",    node_answer_gen)
     g.add_node("human_review",  node_human_review)
@@ -377,6 +378,7 @@ def build_graph() -> StateGraph:
     g.add_edge("professor_b", "consensus")
     g.add_edge("consensus",   "fill_check")
     g.add_edge("student",     "judge")
+    g.add_edge("score_normalize", "answer_gen")
 
     # fill_check 조건부 엣지: 부족하면 교수 재출제, 충분하면 학생으로
     g.add_conditional_edges(
@@ -403,7 +405,7 @@ def build_graph() -> StateGraph:
         {
             "retry":   "retry_prepare",
             "fill": "fill_check",
-            "proceed": "answer_gen",
+            "proceed": "score_normalize",
         },
     )
 
