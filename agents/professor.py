@@ -18,12 +18,19 @@ def _normalize(q: dict) -> dict:
 
 
 def _is_valid(q: dict) -> bool:
-    """content가 비어있거나 JSON 덩어리인 문제 거름."""
+    """content가 비어있거나 JSON/편집용 메타 표현이 섞인 문제 거름."""
     content = q.get("content", "").strip()
+
     if not content:
         return False
+
     if content.startswith("{") or content.startswith("["):
         return False
+
+    forbidden = ("【대문제", "[공통 시나리오]", "[소문항", "공통 시나리오", "소문항")
+    if any(token in content for token in forbidden):
+        return False
+
     return True
 
 _client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
