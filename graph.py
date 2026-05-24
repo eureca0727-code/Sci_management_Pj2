@@ -52,7 +52,10 @@ def _find_blueprint_topic(failed_q: dict, blueprint_topics: list) -> dict | None
         if t.get("name", "") == name:
             return t
     return None
-
+    
+def _full_blueprint(state: ExamState) -> dict:
+    """fill/retry로 state['blueprint']가 부분 blueprint로 바뀌어도 원본 blueprint를 보존."""
+    return state.get("_full_blueprint") or state.get("blueprint") or {"topics": []}
 
 def node_retry_prepare(state: ExamState) -> dict:
     """재출제 전 상태 정리 + 실패 문제 기반 blueprint 필터링 (문제별 횟수 추적)."""
