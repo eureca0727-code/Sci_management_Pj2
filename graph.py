@@ -1,7 +1,7 @@
 from collections import defaultdict
 from langgraph.graph import StateGraph, END
 from state import ExamState
-from agents import indexer, chair, professor, student, judge, answer_gen, human_review, compiler
+from agents import indexer, chair, professor, student, judge, answer_gen, human_review, scenario_gen, compiler
 import config
 import logger
 
@@ -268,6 +268,10 @@ def node_human_review(state: ExamState) -> dict:
     return human_review.run(state)
 
 
+def node_scenario_gen(state: ExamState) -> dict:
+    return scenario_gen.run(state)
+
+
 def node_validate(state: ExamState) -> dict:
     """Compiler 진입 전 최종 검증. 실패하면 compiler로 보내지 않음."""
     passed = state.get("passed_questions", [])
@@ -374,6 +378,7 @@ def build_graph() -> StateGraph:
     g.add_node("validate",      node_validate)
     g.add_node("answer_gen",    node_answer_gen)
     g.add_node("human_review",  node_human_review)
+    g.add_node("scenario_gen",  node_scenario_gen)
     g.add_node("compiler",      node_compiler)
 
     # 초기 흐름
@@ -401,7 +406,8 @@ def build_graph() -> StateGraph:
 
     # 완료 흐름
     g.add_edge("answer_gen",    "human_review")
-    g.add_edge("human_review",  "validate")
+    g.add_edge("human_review",  "scenario_gen")
+    g.add_edge("scenario_gen",  "validate")
     g.add_edge("compiler",   END)
 
     # 조건부 엣지

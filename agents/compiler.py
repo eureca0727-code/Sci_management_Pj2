@@ -44,7 +44,8 @@ def _add_heading(doc: Document, text: str, level: int = 1):
         p.runs[0].font.color.rgb = RGBColor(0, 0, 0)
 
 
-def _build_exam(doc: Document, questions: list[Question], requirements: dict):
+def _build_exam(doc: Document, questions: list[Question], requirements: dict,
+                group_scenarios: dict | None = None):
     doc.add_heading("EXAM", 0)
     doc.add_paragraph(f"Total: {requirements.get('total_score', 100)} points")
     doc.add_paragraph()
@@ -70,6 +71,15 @@ def _build_exam(doc: Document, questions: list[Question], requirements: dict):
                 break
             total_score = sum(q.get("score", 0) for q in chunk)
             _add_heading(doc, f"대문제 {g + 1}  ({total_score}pts)", level=1)
+
+            # 공통 시나리오가 있으면 대문제 앞에 출력
+            scenario = (group_scenarios or {}).get(g)
+            if scenario:
+                p = doc.add_paragraph("다음 사례를 읽고 아래 물음에 답하시오.")
+                p.runs[0].bold = True
+                doc.add_paragraph(scenario)
+                doc.add_paragraph()
+
             for sub_i, q in enumerate(chunk, 1):
                 score = q.get("score", "?")
                 doc.add_paragraph(
@@ -170,7 +180,7 @@ def run(state: ExamState) -> dict:
     ts = datetime.now().strftime("%m%d_%H%M")
 
     exam_doc = Document()
-    _build_exam(exam_doc, passed, requirements)
+    _build_exam(exam_doc, passed, requirements, state.get("group_scenarios", {}))
     exam_path = os.path.join(_OUTPUT_DIR, f"exam_{ts}.docx")
     exam_doc.save(exam_path)
     logger.log("Compiler", f"✅ 시험지 저장: {exam_path}")
