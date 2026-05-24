@@ -329,11 +329,17 @@ def after_judge(state: ExamState) -> str:
     passed_count = len(state.get("passed_questions", []))
 
     if required_total and passed_count < required_total:
-        logger.log(
-            "Graph",
-            f"Judge PASS 후에도 문제 수 부족: {passed_count}/{required_total} → Fill로 복귀"
-        )
-        return "fill"
+        if state.get("fill_count", 0) < _MAX_FILL:
+            logger.log(
+                "Graph",
+                f"Judge PASS 후에도 문제 수 부족: {passed_count}/{required_total} → Fill로 복귀"
+            )
+            return "fill"
+        else:
+            logger.log(
+                "Graph",
+                f"⚠️  Fill 한도 소진 — 문제 수 부족({passed_count}/{required_total})인 채로 진행"
+            )
 
     return "proceed"
 
@@ -344,7 +350,7 @@ def after_validate(state: ExamState) -> str:
     required_total = int(state.get("requirements", {}).get("total_questions", 0))
     passed_count = len(state.get("passed_questions", []))
 
-    if required_total and passed_count < required_total:
+    if required_total and passed_count < required_total and state.get("fill_count", 0) < _MAX_FILL:
         return "fill"
 
     return "score"
