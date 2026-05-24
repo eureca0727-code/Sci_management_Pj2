@@ -37,20 +37,21 @@ def node_judge(state: ExamState) -> dict:
 
 
 def _find_blueprint_topic(failed_q: dict, blueprint_topics: list) -> dict | None:
-    """source_slides 범위로 블루프린트 단원 찾기. 안 되면 topic명 폴백."""
-    source_slides = [int(s) for s in failed_q.get("source_slides", []) if s is not None]
-    if source_slides:
-        for t in blueprint_topics:
-            r = t.get("slides", [])
-            if len(r) >= 2:
-                start, end = int(r[0]), int(r[1])
-                if any(start <= s <= end for s in source_slides):
-                    return t
-    # 폴백: topic명 정확 매칭
+    """topic명 우선으로 블루프린트 단원 찾기. 실패 시 source_slides 범위 폴백."""
     name = failed_q.get("topic", "")
     for t in blueprint_topics:
         if t.get("name", "") == name:
             return t
+
+    # source_slides는 PDF별 슬라이드 번호 충돌 가능성이 있어 폴백으로만 사용
+    source_slides = [int(s) for s in failed_q.get("source_slides", []) if s is not None]
+    if source_slides:
+        for t in blueprint_topics:
+            r = t.get("slide_range", [])
+            if len(r) >= 2:
+                start, end = int(r[0]), int(r[1])
+                if any(start <= s <= end for s in source_slides):
+                    return t
     return None
     
 def _full_blueprint(state: ExamState) -> dict:
