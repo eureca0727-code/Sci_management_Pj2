@@ -409,7 +409,7 @@ def build_graph() -> StateGraph:
         },
     )
 
-     g.add_conditional_edges(
+    g.add_conditional_edges(
          "validate",
          after_validate,
         {
