@@ -62,7 +62,7 @@ def run_blueprint(state: ExamState) -> dict:
               f"개념{t.get('concept_questions',0)}문항 / 사례{t.get('case_questions',0)}문항  "
               f"난이도={t.get('difficulty','?')}")
 
-    return {"blueprint": blueprint}
+    return {"blueprint": blueprint, "_full_blueprint": blueprint}
 
 
 def run_consensus(state: ExamState) -> dict:
@@ -114,8 +114,21 @@ def run_consensus(state: ExamState) -> dict:
     elif isinstance(raw, list):
         kept_entries = raw
 
-    # Offset IDs so retried questions never collide with previously-passed IDs
-    id_offset = len(state.get("passed_questions", []))
+    # Offset IDs so fill/retry questions never collide with previously accepted IDs.
+    existing_questions = (
+       state.get("_accepted_questions", [])
+       or state.get("passed_questions", [])
+       or state.get("questions", [])
+       or []
+    )
+
+    max_existing_id = 0
+    for old_q in existing_questions:
+        qid = str(old_q.get("id", ""))
+        if qid.startswith("Q") and qid[1:].isdigit():
+             max_existing_id = max(max_existing_id, int(qid[1:]))
+
+    id_offset = max_existing_id
 
     # Select original draft questions by index
     questions: list[Question] = []
