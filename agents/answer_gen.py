@@ -56,45 +56,48 @@ def run(state: ExamState) -> dict:
         if not isinstance(raw, dict):
             raw = {"model_answer": str(raw), "key_concepts": [], "rubric": []}
 
-      # 루브릭 합계가 문제 점수와 정확히 일치하도록 정수 점수로 보정
-q_score = int(q.get("score", 0))
-rubric = [item for item in raw.get("rubric", []) if isinstance(item, dict)]
-rubric_sum = sum(float(item.get("points", 0)) for item in rubric)
+    # 루브릭 합계가 문제 점수와 정확히 일치하도록 정수 점수로 보정
+        q_score = int(q.get("score", 0))
+        rubric = [item for item in raw.get("rubric", []) if isinstance(item, dict)]
+        rubric_sum = sum(float(item.get("points", 0)) for item in rubric)
 
-if rubric and rubric_sum > 0:
-    scaled = [float(item.get("points", 0)) * q_score / rubric_sum for item in rubric]
-    int_points = [max(0, int(x)) for x in scaled]
-    remainder = q_score - sum(int_points)
+        if rubric and rubric_sum > 0:
+            scaled = [float(item.get("points", 0)) * q_score / rubric_sum for item in rubric]
+            int_points = [max(0, int(x)) for x in scaled]
+            remainder = q_score - sum(int_points)
 
     # 소수 부분이 큰 항목부터 남은 점수 배분
-    order = sorted(
-        range(len(scaled)),
-        key=lambda i: scaled[i] - int(scaled[i]),
-        reverse=True
-    )
+             order = sorted(
+                range(len(scaled)),
+                key=lambda i: scaled[i] - int(scaled[i]),
+                reverse=True,
+            )
 
-    for i in order[:max(0, remainder)]:
-        int_points[i] += 1
 
+             for i in order[:max(0, remainder)]:
+                int_points[i] += 1
+                 
     # 혹시 초과되면 마지막 항목에서 보정
-    diff = q_score - sum(int_points)
-    int_points[-1] += diff
+         diff = q_score - sum(int_points)
+            int_points[-1] += diff
 
-    for item, pts in zip(rubric, int_points):
-        item["points"] = int(pts)
+            for item, pts in zip(rubric, int_points):
+                item["points"] = int(pts)
 
-    raw["rubric"] = rubric
-    fixed_sum = sum(item["points"] for item in rubric)
+            raw["rubric"] = rubric
+            fixed_sum = sum(item["points"] for item in rubric)
 
-    if abs(rubric_sum - q_score) > 0.001 or fixed_sum != q_score:
-        logger.log("AnswerGen", f"  ⚠️  루브릭 합계 보정: {rubric_sum:.0f}pt → {q_score}pt")
+            if abs(rubric_sum - q_score) > 0.001 or fixed_sum != q_score:
+                logger.log("AnswerGen", f"  ⚠️  루브릭 합계 보정: {rubric_sum:.0f}pt → {q_score}pt")
 
         raw["question_id"] = q["id"]
         raw["question_type"] = q.get("type", "")
         model_answers.append(raw)
 
-        logger.log("AnswerGen", f"  ✅ 루브릭 {len(raw.get('rubric', []))}항목 / "
-                                f"키워드: {raw.get('key_concepts', [])}")
+        logger.log(
+            "AnswerGen",
+            f"  ✅ 루브릭 {len(raw.get('rubric', []))}항목 / 키워드: {raw.get('key_concepts', [])}",
+        )
 
     logger.log("AnswerGen", f"✅ 모범답안 {len(model_answers)}개 생성 완료")
     return {"model_answers": model_answers}
