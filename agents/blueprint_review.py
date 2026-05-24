@@ -20,11 +20,15 @@ def _display(blueprint: dict) -> None:
     for i, t in enumerate(topics, 1):
         group = f"  [대문제 그룹 {t['group_id'] + 1}]" if "group_id" in t else ""
         print(f"  {i}. {t.get('name','?')}{group}")
-        print(f"       개념 {t.get('concept_questions', 0)}문제 / "
-              f"사례 {t.get('case_questions', 0)}문제 / "
+        print(f"       단답형 {t.get('short_answer_questions', 0)}문제 / "
+              f"서술형 {t.get('essay_questions', 0)}문제 / "
+              f"사례적용형 {t.get('application_questions', 0)}문제 / "
               f"난이도 {t.get('difficulty', '?')}")
-    total_q = sum(t.get("concept_questions", 0) + t.get("case_questions", 0)
-                  for t in topics)
+    total_q = sum(
+        t.get("short_answer_questions", 0) + t.get("essay_questions", 0)
+        + t.get("application_questions", 0)
+        for t in topics
+    )
     print(f"\n  총 {total_q}문제")
     print(_SEP)
 
@@ -42,6 +46,25 @@ def run(state: ExamState) -> dict:
         user_input = input("> ").strip()
 
         if user_input.lower() in _CONFIRM:
+            # format_counts와 총합 검증
+            fmt = state["requirements"].get("format_counts", {})
+            topics = blueprint.get("topics", [])
+            actual = {
+                "short_answer": sum(t.get("short_answer_questions", 0) for t in topics),
+                "essay":        sum(t.get("essay_questions", 0) for t in topics),
+                "application":  sum(t.get("application_questions", 0) for t in topics),
+            }
+            mismatches = [
+                f"{k} {fmt.get(k,0)}개 요구 → 블루프린트 {actual[k]}개"
+                for k in ("short_answer", "essay", "application")
+                if actual[k] != int(fmt.get(k, 0))
+            ]
+            if mismatches:
+                print("\n  ⚠️  문제 수가 초기 설정과 다릅니다:")
+                for m in mismatches:
+                    print(f"     {m}")
+                print("  그대로 확정하려면 Enter, 수정하려면 수정 내용 입력\n")
+                continue
             print("\n블루프린트 확정. 문제 출제를 시작합니다...\n")
             break
 

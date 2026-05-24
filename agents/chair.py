@@ -25,7 +25,7 @@ def run_blueprint(state: ExamState) -> dict:
         constraint_text = (
             "\n\n[사용자 지정 단원 구성 — 반드시 준수]\n"
             + json.dumps(user_topics, ensure_ascii=False)
-            + "\n위 단원명과 concept_questions/case_questions 수를 그대로 사용하십시오."
+            + "\n위 단원명과 short_answer_questions/essay_questions/application_questions 수를 그대로 사용하십시오."
             " slides 범위·weight·difficulty만 강의자료에서 추론하십시오."
         )
     else:
@@ -53,13 +53,41 @@ def run_blueprint(state: ExamState) -> dict:
     logger.record_tokens("Chair", response.usage)
     blueprint = parse_json(response.content[0].text)
 
-    topics = blueprint.get("topics", [])
+    topics = [
+        t for t in blueprint.get("topics", [])
+        if t.get("short_answer_questions", 0) + t.get("essay_questions", 0) + t.get("application_questions", 0) > 0
+    ]
+    blueprint["topics"] = topics
+
+    # format_counts 강제 적용: LLM이 초과 생성한 경우 초과분을 뒤 단원부터 차감
+    fmt = state["requirements"].get("format_counts", {})
+    for qtype, key in [("short_answer", "short_answer_questions"),
+                       ("essay", "essay_questions"),
+                       ("application", "application_questions")]:
+        target = int(fmt.get(qtype, 0))
+        total = sum(t.get(key, 0) for t in topics)
+        if total != target:
+            logger.log("Chair", f"⚠️  {qtype} 수 불일치 ({total} → {target}), 조정 중...")
+            excess = total - target
+            for t in reversed(topics):
+                if excess <= 0:
+                    break
+                cur = t.get(key, 0)
+                cut = min(cur, excess)
+                t[key] = cur - cut
+                excess -= cut
+            # 0문제 단원 재정리
+            topics = [t for t in topics if t.get("short_answer_questions", 0) + t.get("essay_questions", 0) + t.get("application_questions", 0) > 0]
+            blueprint["topics"] = topics
+
     logger.log("Chair", f"✅ 블루프린트 확정: {len(topics)}개 단원")
     for t in topics:
         weight = t.get("weight", 0)
         print(f"         단원: {t.get('name','?')}  "
               f"배점비율={weight:.0%}  "
-              f"개념{t.get('concept_questions',0)}문항 / 사례{t.get('case_questions',0)}문항  "
+              f"단답형{t.get('short_answer_questions',0)} / "
+              f"서술형{t.get('essay_questions',0)} / "
+              f"사례적용형{t.get('application_questions',0)}  "
               f"난이도={t.get('difficulty','?')}")
 
     return {"blueprint": blueprint, "_full_blueprint": blueprint}

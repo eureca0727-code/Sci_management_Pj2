@@ -29,7 +29,7 @@ def _judge_question(
         messages=[{
             "role": "user",
             "content": JUDGE.format(
-                question_type=question.get("type", "concept"),
+                question_type=question.get("type", "short_answer"),
                 intended_answer=question.get("intended_answer", ""),
                 source_slides=question.get("source_slides", []),
                 n=len(grounded),
@@ -47,18 +47,21 @@ def _judge_question(
     if not isinstance(raw, dict):
         raw = {}
 
-    q_type = question.get("type", "concept")
+    q_type = question.get("type", "short_answer")
     answer_match       = float(raw.get("answer_match", 0.0))
     ambiguity_score    = float(raw.get("ambiguity_score", 0.0))
     lecture_dependency = float(raw.get("lecture_dependency", 0.0))
     citation_jaccard   = float(raw.get("citation_jaccard", 0.0))
 
     # 지표가 기준을 충족하면 LLM 판정과 무관하게 pass
-    if q_type == "concept":
-        metrics_pass = (answer_match >= config.CONCEPT_ANSWER_MATCH_MIN
+    if q_type == "short_answer":
+        metrics_pass = (answer_match >= config.SHORT_ANSWER_MATCH_MIN
                         and ambiguity_score <= config.AMBIGUITY_MAX)
-    else:
-        metrics_pass = (answer_match >= config.CASE_ANSWER_MATCH_MIN
+    elif q_type == "essay":
+        metrics_pass = (answer_match >= config.ESSAY_MATCH_MIN
+                        and ambiguity_score <= config.AMBIGUITY_MAX)
+    else:  # application
+        metrics_pass = (answer_match >= config.APPLICATION_MATCH_MIN
                         and ambiguity_score <= config.AMBIGUITY_MAX)
 
     llm_passed = bool(raw.get("passed", False))
@@ -84,6 +87,7 @@ def run(state: ExamState) -> dict:
     passed: list[Question] = []
     failed: list[Question] = []
     new_failure_patterns = list(state.get("failure_patterns", []))
+    topic_failure_reasons = dict(state.get("_topic_failure_reasons", {}))
 
     for q in questions:
         logger.log("Judge", f"판정 중: [{q['id']}] {q.get('content','')[:50]}...")
@@ -98,6 +102,9 @@ def run(state: ExamState) -> dict:
             failed.append(q)
             pattern = f"{q.get('type','?')}:{q.get('topic','?')}:{result['failure_reason']}"
             new_failure_patterns.append(pattern)
+            if result.get("failure_reason"):
+                key = f"{q.get('topic','?')}:{q.get('type','?')}"
+                topic_failure_reasons[key] = result["failure_reason"]
 
     # 이전 라운드에서 통과한 문제를 유지 (재출제 시 누적)
     current_ids = {q["id"] for q in questions}
@@ -107,10 +114,45 @@ def run(state: ExamState) -> dict:
     ]
     all_passed = previously_passed + passed
 
+    # rescue pool 갱신: 실패 문제 중 topic:type별 최고 answer_match 보관
+    result_map = {r["question_id"]: r for r in results}
+    rescue_pool = list(state.get("_rescue_pool", []))
+    pool_index = {
+        f"{r['question'].get('topic')}:{r['question'].get('type')}": i
+        for i, r in enumerate(rescue_pool)
+    }
+    for q in failed:
+        r = result_map.get(q["id"])
+        am = float(r["answer_match"]) if r else 0.0
+        key = f"{q.get('topic')}:{q.get('type')}"
+        if key in pool_index:
+            existing = rescue_pool[pool_index[key]]
+            if am > existing["answer_match"]:
+                rescue_pool[pool_index[key]] = {"question": q, "answer_match": am}
+        else:
+            rescue_pool.append({"question": q, "answer_match": am})
+
+    retries = state.get("retry_count", 0)
+    required_total = int(state.get("requirements", {}).get("total_questions", 0))
+
+    # retry 소진 시 부족한 문제를 rescue pool에서 최고점수 순으로 강제 통과
+    if retries >= config.MAX_RETRIES and len(all_passed) < required_total and rescue_pool:
+        passed_ids = {q["id"] for q in all_passed}
+        candidates = sorted(
+            [r for r in rescue_pool if r["question"]["id"] not in passed_ids],
+            key=lambda x: x["answer_match"],
+            reverse=True,
+        )
+        needed = required_total - len(all_passed)
+        for r in candidates[:needed]:
+            all_passed.append(r["question"])
+            failed = [q for q in failed if q["id"] != r["question"]["id"]]
+            logger.log("Judge", f"  🔄 rescue 통과 [{r['question']['id']}] "
+                                f"answer_match={r['answer_match']:.2f} — retry 소진, 최고점수 구제")
+
     logger.log("Judge", f"✅ 판정 완료 — PASS {len(passed)}개 / FAIL {len(failed)}개"
                         + (f" (누적 통과: {len(all_passed)}개)" if previously_passed else ""))
     if failed:
-        retries = state.get("retry_count", 0)
         if retries < config.MAX_RETRIES:
             logger.log("Judge", f"⚠️  실패 문제: {[q['id'] for q in failed]} → 재출제 예정 "
                                 f"(재출제 {retries + 1}/{config.MAX_RETRIES})")
@@ -122,4 +164,6 @@ def run(state: ExamState) -> dict:
         "passed_questions": all_passed,
         "failed_questions": failed,
         "failure_patterns": new_failure_patterns,
+        "_rescue_pool": rescue_pool,
+        "_topic_failure_reasons": topic_failure_reasons,
     }

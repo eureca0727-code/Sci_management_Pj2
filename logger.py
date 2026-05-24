@@ -1,4 +1,7 @@
 import time
+import re
+import os
+from datetime import datetime
 from collections import defaultdict
 
 COLORS = {
@@ -15,6 +18,18 @@ RESET = "\033[0m"
 BOLD  = "\033[1m"
 
 _start = time.time()
+
+# 로그 파일 초기화
+os.makedirs("logs", exist_ok=True)
+_log_path = os.path.join("logs", f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+_log_file = open(_log_path, "w", encoding="utf-8")
+
+def _strip_ansi(text: str) -> str:
+    return re.sub(r"\033\[[0-9;]*m", "", text)
+
+def _fwrite(text: str):
+    _log_file.write(_strip_ansi(text) + "\n")
+    _log_file.flush()
 
 # Claude Sonnet 4-6 가격 ($/1M tokens)
 _PRICE_INPUT  = 3.0
@@ -54,42 +69,63 @@ def show_token_summary():
     print(f"\n  예상 비용: ${cost:.4f}  ({total_in+total_out:,} tokens)")
     print(f"  소요 시간: {time.time()-_start:.1f}s")
     print(f"{'═'*60}\n")
+    _fwrite(f"\n  예상 비용: ${cost:.4f}  ({total_in+total_out:,} tokens)")
+    _fwrite(f"  소요 시간: {time.time()-_start:.1f}s")
+    _fwrite(f"{'═'*60}\n")
+    _log_file.close()
 
 
 def log(agent: str, msg: str):
     elapsed = time.time() - _start
     color = COLORS.get(agent, "")
-    print(f"{color}{BOLD}[{agent:10s}]{RESET} {elapsed:5.1f}s │ {msg}")
+    line = f"{color}{BOLD}[{agent:10s}]{RESET} {elapsed:5.1f}s │ {msg}"
+    print(line)
+    _fwrite(f"[{agent:10s}] {elapsed:5.1f}s │ {msg}")
 
 
 def section(title: str):
     print(f"\n{'─'*60}")
     print(f"  {BOLD}{title}{RESET}")
     print(f"{'─'*60}")
+    _fwrite(f"\n{'─'*60}\n  {title}\n{'─'*60}")
 
 
 def show_question(q: dict):
-    tag = "📘 개념" if q.get("type") == "concept" else "📊 사례"
+    _TAG = {"short_answer": "📘 단답형", "essay": "📝 서술형", "application": "📊 사례적용형"}
+    tag = _TAG.get(q.get("type", ""), "📄 기타")
     score = q.get("score", "?")
     slides = q.get("source_slides", [])
-    print(f"         {tag}  [{q.get('id','?')}]  {q.get('topic','?')}  ({score}점)")
-    print(f"         문제: {q.get('content','')[:80]}{'...' if len(q.get('content',''))>80 else ''}")
-    print(f"         근거 슬라이드: {slides}")
+    lines = [
+        f"         {tag}  [{q.get('id','?')}]  {q.get('topic','?')}  ({score}점)",
+        f"         문제: {q.get('content','')[:80]}{'...' if len(q.get('content',''))>80 else ''}",
+        f"         근거 슬라이드: {slides}",
+    ]
+    for l in lines:
+        print(l)
+        _fwrite(l)
 
 
 def show_judge(r: dict):
     icon = "✅ PASS" if r["passed"] else "❌ FAIL"
-    print(f"         {icon}  [{r['question_id']}]")
-    print(f"         lecture_dep={r['lecture_dependency']:.2f}  "
-          f"citation_J={r['citation_jaccard']:.2f}  "
-          f"ambiguity={r['ambiguity_score']:.2f}  "
-          f"answer_match={r['answer_match']:.2f}")
+    lines = [
+        f"         {icon}  [{r['question_id']}]",
+        f"         lecture_dep={r['lecture_dependency']:.2f}  "
+        f"citation_J={r['citation_jaccard']:.2f}  "
+        f"ambiguity={r['ambiguity_score']:.2f}  "
+        f"answer_match={r['answer_match']:.2f}",
+    ]
     if r.get("failure_reason"):
-        print(f"         실패 이유: {r['failure_reason']}")
+        lines.append(f"         실패 이유: {r['failure_reason']}")
+    for l in lines:
+        print(l)
+        _fwrite(l)
 
 
 def show_student(q_id: str, run: int, answer: str, citations: list, mode: str):
     preview = answer[:100].replace("\n", " ")
-    print(f"         [{q_id}] {mode} run{run}: {preview}...")
+    lines = [f"         [{q_id}] {mode} run{run}: {preview}..."]
     if citations:
-        print(f"         인용: {citations}")
+        lines.append(f"         인용: {citations}")
+    for l in lines:
+        print(l)
+        _fwrite(l)

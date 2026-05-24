@@ -105,23 +105,33 @@ def _build_exam(doc: Document, questions: list[Question], requirements: dict,
                 seq += 1
 
     else:
-        # ── 기본 구조 (파트 I / II) ───────────────────────────
-        concept_qs = [q for q in questions if q.get("type") == "concept"]
-        case_qs    = [q for q in questions if q.get("type") == "case"]
+        # ── 기본 구조 (파트 I / II / III) ────────────────────
+        sa_qs    = [q for q in questions if q.get("type") == "short_answer"]
+        essay_qs = [q for q in questions if q.get("type") == "essay"]
+        app_qs   = [q for q in questions if q.get("type") == "application"]
         seq = 1
 
-        if concept_qs:
-            _add_heading(doc, "Part I — Concept Questions")
-            for q in concept_qs:
+        if sa_qs:
+            _add_heading(doc, "Part I — Short Answer Questions")
+            for q in sa_qs:
                 score = q.get("score", "?")
                 doc.add_paragraph(f"[{seq}] ({score}pts)  {q.get('content', '')}",
                                    style="List Number")
                 doc.add_paragraph()
                 seq += 1
 
-        if case_qs:
-            _add_heading(doc, "Part II — Case Analysis Questions")
-            for q in case_qs:
+        if essay_qs:
+            _add_heading(doc, "Part II — Essay Questions")
+            for q in essay_qs:
+                score = q.get("score", "?")
+                doc.add_paragraph(f"[{seq}] ({score}pts)  {q.get('content', '')}",
+                                   style="List Number")
+                doc.add_paragraph()
+                seq += 1
+
+        if app_qs:
+            _add_heading(doc, "Part III — Application Questions")
+            for q in app_qs:
                 score = q.get("score", "?")
                 doc.add_paragraph(f"[{seq}] ({score}pts)  {q.get('content', '')}",
                                    style="List Number")
@@ -131,10 +141,11 @@ def _build_exam(doc: Document, questions: list[Question], requirements: dict,
 
 def _build_answer_key(doc: Document, model_answers: list[dict],
                       questions: list[Question]):
-    # Build ordered list: concept first, then case — matching exam order
+    # Build ordered list: short_answer → essay → application — matching exam order
+    _TYPE_ORDER = {"short_answer": 0, "essay": 1, "application": 2}
     ordered = sorted(
         questions,
-        key=lambda q: (0 if q.get("type") == "concept" else 1, q.get("id", ""))
+        key=lambda q: (_TYPE_ORDER.get(q.get("type", ""), 3), q.get("id", ""))
     )
     seq_map = {q["id"]: i + 1 for i, q in enumerate(ordered)}
     doc.add_heading("MODEL ANSWERS & RUBRIC", 0)
@@ -178,9 +189,10 @@ def run(state: ExamState) -> dict:
     model_answers = state["model_answers"]
     requirements  = state["requirements"]
 
-    concept_count = sum(1 for q in passed if q.get("type") == "concept")
-    case_count    = sum(1 for q in passed if q.get("type") == "case")
-    logger.log("Compiler", f"개념 {concept_count}문항 + 사례 {case_count}문항 → DOCX 생성 중...")
+    sa_count    = sum(1 for q in passed if q.get("type") == "short_answer")
+    essay_count = sum(1 for q in passed if q.get("type") == "essay")
+    app_count   = sum(1 for q in passed if q.get("type") == "application")
+    logger.log("Compiler", f"단답형 {sa_count} + 서술형 {essay_count} + 사례적용형 {app_count}문항 → DOCX 생성 중...")
 
     os.makedirs(_OUTPUT_DIR, exist_ok=True)
     ts = datetime.now().strftime("%m%d_%H%M")

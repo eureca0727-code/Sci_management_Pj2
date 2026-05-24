@@ -33,14 +33,20 @@ def load_settings() -> dict | None:
 def _show_settings(cfg: dict, pdf_folder: str, pdfs: list[str]):
     print(f"강의 폴더   : {pdf_folder}/  ({len(pdfs)}개 파일)")
     print(f"총 배점     : {cfg['total_score']}점")
-    print(f"총 문제 수  : {cfg['total_questions']}문제")
+    fc = cfg.get("format_counts", {})
+    total_q = sum(fc.values()) if fc else cfg.get("total_questions", 0)
+    print(f"총 문제 수  : {total_q}문제")
     if cfg.get("user_topics"):
         print("단원 구성   :")
         for t in cfg["user_topics"]:
-            print(f"  · {t['name']} — 개념 {t['concept_questions']}문제 / 사례 {t['case_questions']}문제")
-    else:
-        cr = cfg["concept_ratio"]
-        print(f"문제 비율   : 개념 {cr:.0%} / 사례 {1 - cr:.0%}")
+            print(f"  · {t['name']} — "
+                  f"단답형 {t.get('short_answer_questions',0)} / "
+                  f"서술형 {t.get('essay_questions',0)} / "
+                  f"사례적용형 {t.get('application_questions',0)}")
+    elif fc:
+        print(f"문제 형식   : 단답형 {fc.get('short_answer',0)}개 / "
+              f"서술형 {fc.get('essay',0)}개 / "
+              f"사례적용형 {fc.get('application',0)}개")
     if cfg.get("additional_requirements"):
         print(f"추가 요구사항: {cfg['additional_requirements']}")
 
@@ -73,6 +79,29 @@ def run_wizard(pdf_folder: str = "lecture") -> dict:
         if ans == "y":
             print("\n이전 설정으로 문제 생성을 시작합니다...\n")
             prev["pdf_folder"] = pdf_folder
+            # 구 형식(concept_ratio / concept_questions) → 신 형식 마이그레이션
+            if "format_counts" not in prev:
+                total_q = prev.get("total_questions", 10)
+                concept_ratio = prev.get("concept_ratio", 0.5)
+                sa = max(1, round(total_q * concept_ratio / 2))
+                essay = max(1, round(total_q * concept_ratio / 2))
+                app = max(0, total_q - sa - essay)
+                prev["format_counts"] = {"short_answer": sa, "essay": essay, "application": app}
+            # user_topics 구 형식 마이그레이션
+            if prev.get("user_topics"):
+                migrated = []
+                for t in prev["user_topics"]:
+                    if "concept_questions" in t and "short_answer_questions" not in t:
+                        c = t.get("concept_questions", 0)
+                        migrated.append({
+                            "name": t["name"],
+                            "short_answer_questions": max(1, c // 2),
+                            "essay_questions": c - max(1, c // 2),
+                            "application_questions": t.get("case_questions", 0),
+                        })
+                    else:
+                        migrated.append(t)
+                prev["user_topics"] = migrated
             return prev
 
     # ── 3. 배점 ──────────────────────────────────────────
@@ -83,17 +112,16 @@ def run_wizard(pdf_folder: str = "lecture") -> dict:
     # ── 4. 단원별 문제 수 ────────────────────────────────
     print("\n[단원별 문제 수]")
     print("단원을 직접 지정하시겠습니까? (y/n, 기본값 n)")
-    print("  y → 단원명·개념문제수·사례문제수 직접 입력")
-    print("  n → 총 문제 수만 입력하고 AI가 단원 배분")
+    print("  y → 단원명·단답형수·서술형수·사례적용형수 직접 입력")
+    print("  n → 문제 형식별 수만 입력하고 AI가 단원 배분")
     use_topics = _input("> ").lower()
 
     user_topics = None
-    total_questions = 10
-    concept_ratio = 0.5
+    format_counts = {}
 
     if use_topics == "y":
-        print("\n단원명, 개념 문제 수, 사례 문제 수를 한 줄씩 입력하세요.")
-        print("형식: 단원명 개념문제수 사례문제수   (예: 3장 2 1)")
+        print("\n단원명, 단답형 수, 서술형 수, 사례적용형 수를 한 줄씩 입력하세요.")
+        print("형식: 단원명 단답형수 서술형수 사례적용형수   (예: 3장 1 2 1)")
         print("입력이 끝나면 빈 줄에서 Enter를 누르세요.\n")
         user_topics = []
         while True:
@@ -104,34 +132,43 @@ def run_wizard(pdf_folder: str = "lecture") -> dict:
                     user_topics = None
                 break
             parts = line.split()
-            if len(parts) != 3:
-                print("  형식 오류 — 다시 입력하세요. (예: 3장 2 1)")
+            if len(parts) != 4:
+                print("  형식 오류 — 다시 입력하세요. (예: 3장 1 2 1)")
                 continue
             try:
                 user_topics.append({
                     "name": parts[0],
-                    "concept_questions": int(parts[1]),
-                    "case_questions": int(parts[2]),
+                    "short_answer_questions": int(parts[1]),
+                    "essay_questions": int(parts[2]),
+                    "application_questions": int(parts[3]),
                 })
             except ValueError:
                 print("  문제 수는 숫자로 입력하세요.")
 
         if user_topics:
-            total_questions = sum(
-                t["concept_questions"] + t["case_questions"] for t in user_topics
-            )
-            total_concept = sum(t["concept_questions"] for t in user_topics)
-            concept_ratio = total_concept / total_questions if total_questions else 0.5
-    else:
-        raw = _input("총 문제 수 (기본값 10): ")
-        total_questions = int(raw) if raw else 10
-        raw = _input("개념 문제 비율 0~1 (기본값 0.5): ")
-        concept_ratio = float(raw) if raw else 0.5
+            format_counts = {
+                "short_answer": sum(t["short_answer_questions"] for t in user_topics),
+                "essay":        sum(t["essay_questions"] for t in user_topics),
+                "application":  sum(t["application_questions"] for t in user_topics),
+            }
+
+    if not user_topics:
+        # 자동 배분 — 형식별 문제 수만 입력
+        print("\n[문제 형식 설정]")
+        raw = _input("단답형(Short Answer) 문제 수 (기본값 3): ")
+        sa = int(raw) if raw else 3
+        raw = _input("서술형(Essay) 문제 수 (기본값 3): ")
+        essay = int(raw) if raw else 3
+        raw = _input("사례적용형(Application) 문제 수 (기본값 4): ")
+        app = int(raw) if raw else 4
+        format_counts = {"short_answer": sa, "essay": essay, "application": app}
+
+    total_questions = sum(format_counts.values())
 
     # ── 5. 추가 요구사항 ─────────────────────────────────
     print("\n[추가 요구사항]")
     print("추가로 반영할 사항이 있으면 입력하세요. (없으면 Enter)")
-    print("예: '서술형만 출제', '영어 용어 반드시 포함', '난이도 높게'")
+    print("예: '영어 용어 반드시 포함', '난이도 높게'")
     additional = _input("> ")
 
     # ── 6. 최종 확인 ─────────────────────────────────────
@@ -142,7 +179,7 @@ def run_wizard(pdf_folder: str = "lecture") -> dict:
         "pdf_folder": pdf_folder,
         "total_score": total_score,
         "total_questions": total_questions,
-        "concept_ratio": concept_ratio,
+        "format_counts": format_counts,
         "user_topics": user_topics,
         "additional_requirements": additional if additional else None,
     }

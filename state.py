@@ -3,11 +3,11 @@ from typing import TypedDict, List, Optional
 
 class Question(TypedDict):
     id: str
-    type: str             # "concept" | "case"
+    type: str             # "short_answer" | "essay" | "application"
     topic: str
     content: str
     intended_answer: str
-    methodology: Optional[str]   # case 문제만
+    methodology: Optional[str]   # application 문제만
     source_slides: List[int]
     professor: str        # "A" | "B"
     score: int
@@ -35,7 +35,7 @@ class JudgeResult(TypedDict):
 class ExamState(TypedDict):
     # ── 입력 ──────────────────────────────────────────
     pdf_path: str
-    requirements: dict          # {"total_score": 100, "concept_ratio": 0.5, ...}
+    requirements: dict          # {"total_score": 100, "format_counts": {...}, ...}
 
     # ── 블루프린트 (Chair) ─────────────────────────────
     blueprint: Optional[dict]   # 단원별 배점/난이도/유형 분배표
@@ -65,10 +65,12 @@ class ExamState(TypedDict):
     # ── 루프 제어 ─────────────────────────────────────
     retry_count: int
     failure_patterns: List[str]  # 장기 메모리: 실패 패턴 누적
+    _topic_failure_reasons: dict  # {"topic:type" → failure_reason} — 단원별 최신 실패 이유
     fill_count: int              # Chair 부족분 보충 시도 횟수
     _accepted_questions: List[Question]  # fill 라운드 간 누적 채택 문제
     question_fail_counts: dict   # {"topic:type": 실패횟수} — 문제별 재출제 횟수 추적
     _needs_fill: bool            # fill_check → after_fill_check 신호
+    _rescue_pool: list           # [{"question": Question, "answer_match": float}] — 실패 문제 중 최고점수 보관
     group_scenarios: dict        # {대문제인덱스: 공통시나리오텍스트}
     group_config: list           # [{"group_id": 0, "topic_names": ["KJ법", "DMAIC"]}]
 

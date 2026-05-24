@@ -79,7 +79,7 @@ def node_retry_prepare(state: ExamState) -> dict:
 
     # source_slides 기준으로 블루프린트 단원 찾아 재출제 수량 집계
     topic_counts: dict[str, dict] = defaultdict(
-        lambda: {"concept_questions": 0, "case_questions": 0}
+        lambda: {"short_answer_questions": 0, "essay_questions": 0, "application_questions": 0}
     )
     topic_by_name: dict[str, dict] = {}
     unmatched = []
@@ -91,10 +91,13 @@ def node_retry_prepare(state: ExamState) -> dict:
             continue
         name = matched["name"]
         topic_by_name[name] = matched
-        if q.get("type") == "concept":
-            topic_counts[name]["concept_questions"] += 1
+        qtype = q.get("type", "")
+        if qtype == "short_answer":
+            topic_counts[name]["short_answer_questions"] += 1
+        elif qtype == "essay":
+            topic_counts[name]["essay_questions"] += 1
         else:
-            topic_counts[name]["case_questions"] += 1
+            topic_counts[name]["application_questions"] += 1
 
     if unmatched:
         logger.log("Graph", f"  ⚠️  블루프린트 매칭 실패 (건너뜀): {unmatched}")
@@ -107,7 +110,9 @@ def node_retry_prepare(state: ExamState) -> dict:
 
     for t in retry_topics:
         logger.log("Graph", f"  재출제: '{t.get('name','?')}' — "
-                            f"개념 {t.get('concept_questions',0)}개 / 사례 {t.get('case_questions',0)}개")
+                            f"단답형 {t.get('short_answer_questions',0)}개 / "
+                            f"서술형 {t.get('essay_questions',0)}개 / "
+                            f"사례적용형 {t.get('application_questions',0)}개")
 
     return {
         "retry_count": retries + 1,
@@ -120,7 +125,7 @@ def node_retry_prepare(state: ExamState) -> dict:
     }
 
 
-_MAX_FILL = 3  # Chair 부족분 보충 최대 시도 횟수
+_MAX_FILL = config.MAX_FILL  # Chair 부족분 보충 최대 시도 횟수
 
 def _topic_type_counts(questions: list[dict]) -> dict[tuple[str, str], int]:
     counts = defaultdict(int)
@@ -143,54 +148,60 @@ def node_fill_check(state: ExamState) -> dict:
     counts = _topic_type_counts(accumulated)
     fill_topics = []
 
-    required_concept = 0
-    required_case = 0
-    current_concept = 0
-    current_case = 0
+    total_required = 0
+    total_current = 0
 
     for t in blueprint.get("topics", []):
         topic_name = t.get("name", "")
-        need_concept_total = int(t.get("concept_questions", 0))
-        need_case_total = int(t.get("case_questions", 0))
+        need_sa    = int(t.get("short_answer_questions", 0))
+        need_essay = int(t.get("essay_questions", 0))
+        need_app   = int(t.get("application_questions", 0))
 
-        have_concept = counts.get((topic_name, "concept"), 0)
-        have_case = counts.get((topic_name, "case"), 0)
+        have_sa    = counts.get((topic_name, "short_answer"), 0)
+        have_essay = counts.get((topic_name, "essay"), 0)
+        have_app   = counts.get((topic_name, "application"), 0)
 
-        required_concept += need_concept_total
-        required_case += need_case_total
-        current_concept += min(have_concept, need_concept_total)
-        current_case += min(have_case, need_case_total)
+        total_required += need_sa + need_essay + need_app
+        total_current  += (min(have_sa, need_sa)
+                           + min(have_essay, need_essay)
+                           + min(have_app, need_app))
 
-        short_concept = max(0, need_concept_total - have_concept)
-        short_case = max(0, need_case_total - have_case)
+        short_sa    = max(0, need_sa - have_sa)
+        short_essay = max(0, need_essay - have_essay)
+        short_app   = max(0, need_app - have_app)
 
-        if short_concept > 0 or short_case > 0:
+        if short_sa > 0 or short_essay > 0 or short_app > 0:
             fill_topics.append({
                 **t,
-                "concept_questions": short_concept,
-                "case_questions": short_case,
+                "short_answer_questions": short_sa,
+                "essay_questions": short_essay,
+                "application_questions": short_app,
             })
 
     logger.log(
         "Graph",
-        f"[Fill Check] 개념 {current_concept}/{required_concept}  사례 {current_case}/{required_case}"
+        f"[Fill Check] {total_current}/{total_required} 문항 확보"
     )
 
     if fill_topics and state.get("fill_count", 0) < _MAX_FILL:
         fill_blueprint = {**blueprint, "topics": fill_topics}
 
+        sa_short    = sum(t["short_answer_questions"] for t in fill_topics)
+        essay_short = sum(t["essay_questions"] for t in fill_topics)
+        app_short   = sum(t["application_questions"] for t in fill_topics)
         logger.log(
             "Graph",
-            f"  → 부족분 보충: 개념 {sum(t['concept_questions'] for t in fill_topics)}개 "
-            f"/ 사례 {sum(t['case_questions'] for t in fill_topics)}개 "
-            f"(fill #{state.get('fill_count', 0) + 1})"
+            f"  → 부족분 보충: 단답형 {sa_short}개 / 서술형 {essay_short}개 / "
+            f"사례적용형 {app_short}개  (fill #{state.get('fill_count', 0) + 1})"
         )
 
         for t in fill_topics:
             logger.log(
                 "Graph",
                 f"     부족 단원: {t.get('name','?')} "
-                f"개념 {t.get('concept_questions',0)} / 사례 {t.get('case_questions',0)}"
+                f"단답형 {t.get('short_answer_questions',0)} / "
+                f"서술형 {t.get('essay_questions',0)} / "
+                f"사례적용형 {t.get('application_questions',0)}"
             )
 
         return {
@@ -204,10 +215,29 @@ def node_fill_check(state: ExamState) -> dict:
         }
 
     if fill_topics:
-        logger.log(
-            "Graph",
-            "  ⚠️  최대 fill 시도 도달 — 부족한 채로 진행하지 않고 validation에서 차단됩니다."
+        logger.log("Graph", "  ⚠️  최대 fill 시도 도달 — rescue pool에서 부족분 보충 시도")
+        rescue_pool = state.get("_rescue_pool", [])
+        passed_ids = {q["id"] for q in accumulated}
+        still_needed = sum(
+            t.get("short_answer_questions", 0)
+            + t.get("essay_questions", 0)
+            + t.get("application_questions", 0)
+            for t in fill_topics
         )
+        candidates = sorted(
+            [r for r in rescue_pool if r["question"]["id"] not in passed_ids],
+            key=lambda x: x["answer_match"],
+            reverse=True,
+        )[:still_needed]
+        for r in candidates:
+            accumulated.append(r["question"])
+            logger.log(
+                "Graph",
+                f"  🔄 rescue 통과 [{r['question']['id']}] "
+                f"answer_match={r['answer_match']:.2f} — 문제 수 보장",
+            )
+        if not candidates:
+            logger.log("Graph", "  ⚠️  rescue pool에도 후보 없음 — 부족한 채로 진행")
 
     return {
         "_accepted_questions": accumulated,
@@ -358,10 +388,13 @@ def after_validate(state: ExamState) -> str:
     required_total = int(state.get("requirements", {}).get("total_questions", 0))
     passed_count = len(state.get("passed_questions", []))
 
+    # fill 여력이 있고 문제 수가 부족하면 fill로
     if required_total and passed_count < required_total and state.get("fill_count", 0) < _MAX_FILL:
         return "fill"
 
-    return "score"
+    # fill 한도 소진 or 점수 불일치 — 더 이상 루프하지 않고 compiler로 강제 진행
+    logger.log("Validate", "⚠️  조건 미충족이지만 더 이상 보정 불가 → 현재 상태로 compiler 진행")
+    return "compiler"
 
 
 # ── 그래프 조립 ───────────────────────────────────────────────────

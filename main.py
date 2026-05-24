@@ -3,7 +3,7 @@
   python main.py                                    ← 인터랙티브 모드 (권장)
   python main.py --pdf lecture --total 100          ← CLI 모드
   python main.py --api-key sk-ant-... --pdf lecture ← API 키 직접 입력
-  python main.py --pdf lecture --topic 3장:2:1 --topic 5장:1:2
+  python main.py --pdf lecture --topic 3장:1:2:1 --topic 5장:2:1:1
 """
 
 import argparse
@@ -32,11 +32,12 @@ def parse_args():
     p.add_argument("--api-key", help="Anthropic API Key (없으면 환경변수 또는 입력 프롬프트 사용)")
     p.add_argument("--pdf", help="강의자료 PDF 경로 또는 폴더 경로")
     p.add_argument("--total", type=int, default=100, help="총 배점")
-    p.add_argument("--concept", type=float, default=0.5, help="개념 문제 비율 (0~1)")
-    p.add_argument("--questions", type=int, default=10, help="총 문제 수")
+    p.add_argument("--short-answer", type=int, default=3, help="단답형 문제 수")
+    p.add_argument("--essay", type=int, default=3, help="서술형 문제 수")
+    p.add_argument("--application", type=int, default=4, help="사례적용형 문제 수")
     p.add_argument("--topic", action="append", dest="topics",
-                   metavar="단원명:개념:사례",
-                   help="단원별 문제 수 지정 (반복 사용 가능). 예: --topic 3장:2:1")
+                   metavar="단원명:단답형:서술형:사례적용형",
+                   help="단원별 문제 수 지정 (반복 사용 가능). 예: --topic 3장:1:2:1")
     return p.parse_args()
 
 
@@ -44,26 +45,27 @@ def parse_topics(raw_topics: list[str]) -> list[dict]:
     result = []
     for t in raw_topics:
         parts = t.split(":")
-        if len(parts) != 3:
+        if len(parts) != 4:
             raise ValueError(
-                f"--topic 형식 오류: '{t}'\n올바른 형식: 단원명:개념문제수:사례문제수  (예: 3장:2:1)"
+                f"--topic 형식 오류: '{t}'\n올바른 형식: 단원명:단답형:서술형:사례적용형  (예: 3장:1:2:1)"
             )
         result.append({
             "name": parts[0],
-            "concept_questions": int(parts[1]),
-            "case_questions": int(parts[2]),
+            "short_answer_questions": int(parts[1]),
+            "essay_questions": int(parts[2]),
+            "application_questions": int(parts[3]),
         })
     return result
 
 
-def build_state(pdf_path: str, total_score: int, total_questions: int,
-                concept_ratio: float, user_topics, additional_requirements) -> ExamState:
+def build_state(pdf_path: str, total_score: int, format_counts: dict,
+                user_topics, additional_requirements) -> ExamState:
+    total_questions = sum(format_counts.values())
     return {
         "pdf_path": pdf_path,
         "requirements": {
             "total_score": total_score,
-            "concept_ratio": concept_ratio,
-            "case_ratio": 1 - concept_ratio,
+            "format_counts": format_counts,
             "total_questions": total_questions,
             "user_topics": user_topics,
             "additional_requirements": additional_requirements,
@@ -84,6 +86,8 @@ def build_state(pdf_path: str, total_score: int, total_questions: int,
         "_accepted_questions": [],
         "question_fail_counts": {},
         "_needs_fill": False,
+        "_rescue_pool": [],
+        "_topic_failure_reasons": {},
         "group_scenarios": {},
         "group_config": [],
         "output_path": None,
@@ -114,8 +118,7 @@ def main():
         initial_state = build_state(
             pdf_path=cfg["pdf_folder"],
             total_score=cfg["total_score"],
-            total_questions=cfg["total_questions"],
-            concept_ratio=cfg["concept_ratio"],
+            format_counts=cfg["format_counts"],
             user_topics=cfg["user_topics"],
             additional_requirements=cfg["additional_requirements"],
         )
@@ -128,18 +131,22 @@ def main():
         user_topics = None
         if args.topics:
             user_topics = parse_topics(args.topics)
-            total_q = sum(t["concept_questions"] + t["case_questions"] for t in user_topics)
-            total_concept = sum(t["concept_questions"] for t in user_topics)
-            concept_ratio = total_concept / total_q if total_q else 0.5
+            format_counts = {
+                "short_answer": sum(t["short_answer_questions"] for t in user_topics),
+                "essay":        sum(t["essay_questions"] for t in user_topics),
+                "application":  sum(t["application_questions"] for t in user_topics),
+            }
         else:
-            total_q = args.questions
-            concept_ratio = args.concept
+            format_counts = {
+                "short_answer": args.short_answer,
+                "essay":        args.essay,
+                "application":  args.application,
+            }
 
         initial_state = build_state(
             pdf_path=args.pdf,
             total_score=args.total,
-            total_questions=total_q,
-            concept_ratio=concept_ratio,
+            format_counts=format_counts,
             user_topics=user_topics,
             additional_requirements=None,
         )

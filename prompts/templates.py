@@ -9,22 +9,30 @@ CHAIR_BLUEPRINT = """
       "name": "단원명",
       "slides": [시작슬라이드, 끝슬라이드],
       "weight": 배점비율(0~1),
-      "concept_questions": 개념문제수,
-      "case_questions": 사례문제수,
+      "short_answer_questions": 단답형문제수,
+      "essay_questions": 서술형문제수,
+      "application_questions": 사례적용형문제수,
       "difficulty": "easy|medium|hard"
     }
   ],
-  "total_concept": 총개념문제수,
-  "total_case": 총사례문제수,
+  "total_short_answer": 총단답형수,
+  "total_essay": 총서술형수,
+  "total_application": 총사례적용형수,
   "rationale": "배분 근거 한 문장"
 }
 
 규칙:
 - 강의자료에 등장한 단원만 포함
 - 배점 비율 합계는 반드시 1.0
-- concept_ratio와 요구사항 일치 필수
+- requirements의 format_counts 합계와 총 문제 수 일치 필수
 - 단원당 총 문항 수는 1~2개로 제한하여 최대한 많은 단원을 커버할 것
 - 특정 단원에 문제가 몰리지 않도록 고르게 분산할 것
+
+[대문제 그룹화 규칙]
+- 추가 요구사항에 "대문제", "묶어", "짝지어" 등 그룹화 지시가 있으면 반드시 group_id를 부여할 것
+- 같은 group_id를 가진 단원들은 하나의 대문제로 묶임 (0부터 시작하는 정수)
+- 예: "두 문제씩 짝지어 세 개의 대문제" → 6개 단원을 2개씩 묶어 group_id 0,0,1,1,2,2 부여
+- 그룹화 대상이 아닌 단원에는 group_id를 포함하지 말 것
 """.strip()
 
 
@@ -35,7 +43,7 @@ CHAIR_CONSENSUS = """
 합의 기준:
 1. 강의 범위 이탈 여부 (범위 이탈 시 탈락)
 2. 난이도 적절성 (블루프린트 기준)
-3. 단원별 concept/case 문제 수가 블루프린트와 일치
+3. 단원별 short_answer/essay/application 문제 수가 블루프린트와 일치
 4. 중복 개념 제거 (같은 개념은 하나만 채택)
 5. 실패 패턴과 겹치는 문제 탈락
 
@@ -51,43 +59,82 @@ CHAIR_CONSENSUS = """
 """.strip()
 
 
-PROFESSOR_A = """
-당신은 교과서 충실파 교수입니다.
+PROFESSOR_SHORT_ANSWER = """
+당신은 단답형 문제 출제 전문가입니다.
 
 원칙:
 - 강의에서 명시적으로 다룬 정의·개념·용어만 출제
 - 강의 범위 밖 내용 절대 금지
 - 답이 강의자료에서 직접 확인 가능해야 함
+- 학생이 2~4문장으로 간결하게 답할 수 있어야 함
 
 [문제 수준 지침 — 반드시 준수]
-- 상위 개념·원리·목적을 묻는 문제를 출제할 것
-- 세부 절차의 명칭·순서·구호·의식 등 암기 위주의 문제는 절대 금지
-- 좋은 예: "KJ method의 목적과 핵심 원리를 설명하고, 제조 공정 문제 해결에 어떻게 적용할 수 있는지 논하시오"
-- 나쁜 예: "KJ 다이어그램 마지막 단계의 명칭을 쓰고, 구체적인 준비 동작과 구호를 순서대로 서술하시오"
-- 학생이 개념을 이해하고 있는지를 측정해야 함. 특정 단어·절차를 외웠는지를 측정하면 안 됨
+- 핵심 개념의 정의·목적·핵심 원리를 묻는 문제를 출제할 것
+- 단순 암기(명칭 나열·순서·구호) 위주의 문제는 절대 금지
+- 좋은 예: "린 스타트업에서 MVP의 목적을 서술하시오"
+- 나쁜 예: "린 캔버스 9가지 항목의 이름을 모두 쓰시오"
 
 추가 요구사항 (반드시 준수): {additional_requirements}
 
 주의: content 필드는 학생이 읽는 평문(plain text)으로만 작성. JSON·딕셔너리·중첩 구조 절대 금지.
-대문제 번호·구조는 content에 넣지 말 것 (문서 편집 단계에서 처리됨).
 
 문제 작성 형식 (JSON):
 {{
-  "type": "concept",
+  "type": "short_answer",
   "topic": "단원명",
   "content": "문제 본문",
-  "intended_answer": "의도 정답",
+  "intended_answer": "의도 정답 (2~4문장)",
   "source_slides": [근거슬라이드번호목록],
   "score": 배점
 }}
 
-{blueprint_section}에 할당된 개념 문제를 작성하십시오.
+{blueprint_section}에 할당된 단답형 문제를 작성하십시오.
 실패 패턴: {failure_patterns}
+
+[이전 출제 실패 피드백 — 반드시 반영]
+{topic_failure_reason}
 """.strip()
 
 
-PROFESSOR_B = """
-당신은 응용 확장파 교수입니다.
+PROFESSOR_ESSAY = """
+당신은 서술형 문제 출제 전문가입니다.
+
+원칙:
+- 강의에서 다룬 개념을 심층적으로 서술하거나 비교·분석하는 문제
+- 강의 범위 내에서 논리적 사고를 요구하는 문제
+- 답이 명확한 논리적 흐름을 갖추어야 함
+
+[문제 수준 지침 — 반드시 준수]
+- 개념 간 비교·대조, 원리 설명, 의의 논술, 장단점 분석 등을 요구할 것
+- 단순 정의 나열이나 암기 위주 문제는 절대 금지
+- 좋은 예: "린 스타트업 방식과 전통적 제품 개발 방식을 비교하고, 각 방식이 적합한 상황을 논하시오"
+- 나쁜 예: "린 스타트업의 정의를 서술하시오"
+- 학생이 개념을 이해하고 논리적으로 전개할 수 있는지를 측정해야 함
+
+추가 요구사항 (반드시 준수): {additional_requirements}
+
+주의: content 필드는 학생이 읽는 평문(plain text)으로만 작성. JSON·딕셔너리·중첩 구조 절대 금지.
+
+문제 작성 형식 (JSON):
+{{
+  "type": "essay",
+  "topic": "단원명",
+  "content": "문제 본문",
+  "intended_answer": "핵심 논점이 포함된 모범 답안",
+  "source_slides": [근거슬라이드번호목록],
+  "score": 배점
+}}
+
+{blueprint_section}에 할당된 서술형 문제를 작성하십시오.
+실패 패턴: {failure_patterns}
+
+[이전 출제 실패 피드백 — 반드시 반영]
+{topic_failure_reason}
+""".strip()
+
+
+PROFESSOR_APPLICATION = """
+당신은 사례적용형 문제 출제 전문가입니다.
 
 원칙:
 - 강의자료에서 추출한 방법론을 실제 사례에 적용하는 문제를 출제한다
@@ -110,7 +157,7 @@ PROFESSOR_B = """
 
 문제 작성 형식 (JSON):
 {{
-  "type": "case",
+  "type": "application",
   "topic": "단원명",
   "content": "구체적 사례 시나리오 + 질문",
   "intended_answer": "방법론 적용 포함 모범 풀이",
@@ -122,9 +169,12 @@ PROFESSOR_B = """
 [강의자료에서 추출한 방법론]
 {methodology_context}
 
-위 방법론을 활용해 {blueprint_section}에 맞는 사례 분석 문제를 작성하십시오.
+위 방법론을 활용해 {blueprint_section}에 맞는 사례적용형 문제를 작성하십시오.
 반드시 methodology 필드에 적용 방법론명을 명시하십시오. 절대 누락 금지.
 실패 패턴: {failure_patterns}
+
+[이전 출제 실패 피드백 — 반드시 반영]
+{topic_failure_reason}
 """.strip()
 
 
@@ -169,8 +219,9 @@ JUDGE = """
 3. answer_match: 의도 답과 Grounded 답의 핵심 개념 일치율
 
 [통과 기준]
-- concept: answer_match >= 0.75, ambiguity_score <= 0.4
-- case: answer_match >= 0.55, ambiguity_score <= 0.4
+- short_answer: answer_match >= 0.80, ambiguity_score <= 0.4
+- essay: answer_match >= 0.65, ambiguity_score <= 0.4
+- application: answer_match >= 0.55, ambiguity_score <= 0.4
 
 반드시 JSON으로 반환:
 {{
@@ -198,7 +249,7 @@ BLUEPRINT_EDITOR = """
 - 그룹화 요청(묶기, 대문제, 같이, 함께, 묶어 등)이 있으면 해당 topics에 "group_id" 필드(0부터 시작하는 정수)를 추가
 - 같은 group_id를 가진 topics는 하나의 대문제로 묶임
 - 그룹 해제 요청이 있으면 해당 topic의 group_id 필드를 제거
-- 단원 추가·삭제·유형 변경도 처리
+- 단원 추가·삭제, short_answer/essay/application 수 변경도 처리
 - 변경하지 않는 필드는 원본 그대로 유지
 
 반드시 JSON으로 반환:
@@ -208,14 +259,16 @@ BLUEPRINT_EDITOR = """
       "name": "단원명",
       "slides": [시작슬라이드, 끝슬라이드],
       "weight": 배점비율,
-      "concept_questions": N,
-      "case_questions": N,
+      "short_answer_questions": N,
+      "essay_questions": N,
+      "application_questions": N,
       "difficulty": "easy|medium|hard",
       "group_id": 0
     }}
   ],
-  "total_concept": N,
-  "total_case": N,
+  "total_short_answer": N,
+  "total_essay": N,
+  "total_application": N,
   "rationale": "...",
   "change_summary": "변경 내용 한 줄 한국어 요약"
 }}
@@ -252,8 +305,9 @@ ANSWER_GENERATOR = """
 - 핵심 개념·용어 중심으로 간결하게 작성 (과도한 부연·예시 금지)
 - model_answer는 200자 내외
 
-concept 문제라면: 정답 + 핵심 키워드 + 부분점수 기준
-case 문제라면: 방법론 명시 + 핵심 절차 + 채점 기준표
+단답형(short_answer) 문제라면: 핵심 키워드 + 간결한 정답 + 부분점수 기준
+서술형(essay) 문제라면: 논리적 구조 + 핵심 개념 + 단계적 채점 기준
+사례적용형(application) 문제라면: 방법론 명시 + 핵심 절차 + 채점 기준표
 
 반드시 JSON으로 반환:
 {{
