@@ -70,6 +70,7 @@ class ExamState(TypedDict):
     question_fail_counts: dict   # {"topic:type": 실패횟수} — 문제별 재출제 횟수 추적
     _needs_fill: bool            # fill_check → after_fill_check 신호
     group_scenarios: dict        # {대문제인덱스: 공통시나리오텍스트}
+    group_config: list           # [{"group_id": 0, "topic_names": ["KJ법", "DMAIC"]}]
 
     # ── 출력 ──────────────────────────────────────────
     output_path: Optional[str]

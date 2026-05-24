@@ -1,4 +1,3 @@
-import re
 import anthropic
 from state import ExamState
 from prompts.templates import SCENARIO_GENERATOR
@@ -7,33 +6,6 @@ import config
 import logger
 
 _client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-
-_KR_NUM = {
-    "한": 1, "하나": 1, "일": 1,
-    "두": 2, "둘": 2, "이": 2,
-    "세": 3, "셋": 3, "삼": 3,
-    "네": 4, "넷": 4, "사": 4,
-    "다섯": 5, "오": 5,
-    "여섯": 6, "육": 6,
-    "일곱": 7, "칠": 7,
-    "여덟": 8, "팔": 8,
-    "아홉": 9, "구": 9,
-    "열": 10, "십": 10,
-}
-
-
-def _parse_group_config(additional: str):
-    if not additional or "대문제" not in additional:
-        return None, None
-
-    def _to_int(token):
-        return int(token) if token.isdigit() else _KR_NUM.get(token)
-
-    size_m  = re.search(r'(\d+|\w+)\s*문제씩', additional)
-    count_m = re.search(r'(\d+|\w+)\s*개(?:의)?\s*대문제', additional)
-    group_size  = _to_int(size_m.group(1))  if size_m  else 2
-    group_count = _to_int(count_m.group(1)) if count_m else None
-    return group_size, group_count
 
 
 def _generate_scenario(questions: list[dict]) -> str:
@@ -57,35 +29,35 @@ def _generate_scenario(questions: list[dict]) -> str:
 def run(state: ExamState) -> dict:
     logger.section("STEP 8.6 — Shared Scenario Generation")
 
-    requirements = state.get("requirements", {})
-    additional   = requirements.get("additional_requirements", "") or ""
-    group_size, group_count = _parse_group_config(additional)
-
-    if not group_size or not group_count:
-        logger.log("ScenarioGen", "대문제 설정 없음 — 스킵")
+    group_config = state.get("group_config", [])
+    if not group_config:
+        logger.log("ScenarioGen", "그룹 설정 없음 — 스킵")
         return {}
 
     passed = state.get("passed_questions", [])
-    ordered = (
-        [q for q in passed if q.get("type") == "concept"] +
-        [q for q in passed if q.get("type") == "case"]
-    )
+    topic_to_q: dict[str, list] = {}
+    for q in passed:
+        topic_to_q.setdefault(q.get("topic", ""), []).append(q)
 
     group_scenarios: dict[int, str] = {}
 
-    for g in range(group_count):
-        chunk = ordered[g * group_size:(g + 1) * group_size]
-        if not chunk:
-            break
+    for gc in group_config:
+        gid = gc["group_id"]
+        topic_names = gc["topic_names"]
+
+        # 해당 그룹의 질문들 수집
+        chunk = []
+        for name in topic_names:
+            chunk.extend(topic_to_q.get(name, []))
 
         if len(chunk) < 2:
-            logger.log("ScenarioGen", f"  대문제 {g+1}: 소문항 1개 → 공통 시나리오 생략")
+            logger.log("ScenarioGen", f"  그룹 {gid+1}: 문제 {len(chunk)}개 → 시나리오 생략")
             continue
 
-        logger.log("ScenarioGen", f"  대문제 {g+1} 공통 시나리오 생성 중... "
-                                  f"({', '.join(q.get('topic','?') for q in chunk)})")
+        logger.log("ScenarioGen", f"  그룹 {gid+1} 공통 시나리오 생성 중... "
+                                  f"({', '.join(topic_names)})")
         scenario = _generate_scenario(chunk)
-        group_scenarios[g] = scenario
-        logger.log("ScenarioGen", f"  ✅ 대문제 {g+1} 시나리오: {scenario[:60]}...")
+        group_scenarios[gid] = scenario
+        logger.log("ScenarioGen", f"  ✅ 그룹 {gid+1}: {scenario[:60]}...")
 
     return {"group_scenarios": group_scenarios}

@@ -184,6 +184,46 @@ JUDGE = """
 """.strip()
 
 
+BLUEPRINT_EDITOR = """
+당신은 시험 블루프린트 편집 도우미입니다.
+
+현재 블루프린트:
+{current_blueprint}
+
+사용자 요청: {user_request}
+
+요청을 반영하여 블루프린트를 수정하고 완전한 JSON을 반환하십시오.
+
+규칙:
+- 그룹화 요청(묶기, 대문제, 같이, 함께, 묶어 등)이 있으면 해당 topics에 "group_id" 필드(0부터 시작하는 정수)를 추가
+- 같은 group_id를 가진 topics는 하나의 대문제로 묶임
+- 그룹 해제 요청이 있으면 해당 topic의 group_id 필드를 제거
+- 단원 추가·삭제·유형 변경도 처리
+- 변경하지 않는 필드는 원본 그대로 유지
+
+반드시 JSON으로 반환:
+{{
+  "topics": [
+    {{
+      "name": "단원명",
+      "slides": [시작슬라이드, 끝슬라이드],
+      "weight": 배점비율,
+      "concept_questions": N,
+      "case_questions": N,
+      "difficulty": "easy|medium|hard",
+      "group_id": 0
+    }}
+  ],
+  "total_concept": N,
+  "total_case": N,
+  "rationale": "...",
+  "change_summary": "변경 내용 한 줄 한국어 요약"
+}}
+
+group_id는 그룹화된 단원에만 포함하고, 단일 문제 단원에는 포함하지 마십시오.
+""".strip()
+
+
 SCENARIO_GENERATOR = """
 당신은 시험 문제 설계 전문가입니다.
 아래 소문항들을 하나의 대문제로 묶기 위한 공통 사례 시나리오를 작성하십시오.

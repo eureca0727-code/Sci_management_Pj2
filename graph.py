@@ -1,7 +1,7 @@
 from collections import defaultdict
 from langgraph.graph import StateGraph, END
 from state import ExamState
-from agents import indexer, chair, professor, student, judge, answer_gen, human_review, scenario_gen, compiler
+from agents import indexer, chair, professor, student, judge, answer_gen, human_review, scenario_gen, blueprint_review, compiler
 import config
 import logger
 
@@ -14,6 +14,10 @@ def node_index(state: ExamState) -> dict:
 
 def node_blueprint(state: ExamState) -> dict:
     return chair.run_blueprint(state)
+
+
+def node_blueprint_review(state: ExamState) -> dict:
+    return blueprint_review.run(state)
 
 
 def node_professor_a(state: ExamState) -> dict:
@@ -366,8 +370,9 @@ def build_graph() -> StateGraph:
     g = StateGraph(ExamState)
 
     g.add_node("index",         node_index)
-    g.add_node("blueprint",     node_blueprint)
-    g.add_node("professor_a",   node_professor_a)
+    g.add_node("blueprint",         node_blueprint)
+    g.add_node("blueprint_review",  node_blueprint_review)
+    g.add_node("professor_a",       node_professor_a)
     g.add_node("professor_b",   node_professor_b)
     g.add_node("consensus",     node_consensus)
     g.add_node("fill_check",    node_fill_check)
@@ -383,8 +388,9 @@ def build_graph() -> StateGraph:
 
     # 초기 흐름
     g.set_entry_point("index")
-    g.add_edge("index",       "blueprint")
-    g.add_edge("blueprint",   "professor_a")
+    g.add_edge("index",            "blueprint")
+    g.add_edge("blueprint",        "blueprint_review")
+    g.add_edge("blueprint_review", "professor_a")
     g.add_edge("professor_a", "professor_b")
     g.add_edge("professor_b", "consensus")
     g.add_edge("consensus",   "fill_check")

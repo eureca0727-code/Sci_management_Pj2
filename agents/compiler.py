@@ -45,35 +45,39 @@ def _add_heading(doc: Document, text: str, level: int = 1):
 
 
 def _build_exam(doc: Document, questions: list[Question], requirements: dict,
+                group_config: list | None = None,
                 group_scenarios: dict | None = None):
     doc.add_heading("EXAM", 0)
     doc.add_paragraph(f"Total: {requirements.get('total_score', 100)} points")
     doc.add_paragraph()
 
-    additional = requirements.get("additional_requirements", "") or ""
-    group_size, group_count = _parse_group_config(additional)
+    group_config = group_config or []
+    group_scenarios = group_scenarios or {}
 
-    # 출력 순서: 개념 먼저, 사례 나중
-    ordered = (
-        [q for q in questions if q.get("type") == "concept"] +
-        [q for q in questions if q.get("type") == "case"]
-    )
+    if group_config:
+        # ── 그룹 구성 ─────────────────────────────────────────
+        # topic → group_id 매핑
+        topic_to_gid: dict[str, int] = {}
+        for gc in group_config:
+            for name in gc["topic_names"]:
+                topic_to_gid[name] = gc["group_id"]
 
-    if group_size and group_count:
-        # ── 대문제 구조 ───────────────────────────────────────
-        grouped_total = group_size * group_count
-        grouped_qs    = ordered[:grouped_total]
-        standalone_qs = ordered[grouped_total:]
+        grouped: dict[int, list] = {}
+        standalone: list = []
+        for q in questions:
+            gid = topic_to_gid.get(q.get("topic", ""))
+            if gid is not None:
+                grouped.setdefault(gid, []).append(q)
+            else:
+                standalone.append(q)
 
-        for g in range(group_count):
-            chunk = grouped_qs[g * group_size:(g + 1) * group_size]
-            if not chunk:
-                break
+        seq = 1
+        for gid in sorted(grouped):
+            chunk = grouped[gid]
             total_score = sum(q.get("score", 0) for q in chunk)
-            _add_heading(doc, f"대문제 {g + 1}  ({total_score}pts)", level=1)
+            _add_heading(doc, f"대문제 {gid + 1}  ({total_score}pts)", level=1)
 
-            # 공통 시나리오가 있으면 대문제 앞에 출력
-            scenario = (group_scenarios or {}).get(g)
+            scenario = group_scenarios.get(gid)
             if scenario:
                 p = doc.add_paragraph("다음 사례를 읽고 아래 물음에 답하시오.")
                 p.runs[0].bold = True
@@ -87,21 +91,23 @@ def _build_exam(doc: Document, questions: list[Question], requirements: dict,
                     style="List Number",
                 )
                 doc.add_paragraph()
+            seq += len(chunk)
 
-        if standalone_qs:
-            _add_heading(doc, "추가 문제", level=1)
-            for seq, q in enumerate(standalone_qs, grouped_total + 1):
+        if standalone:
+            _add_heading(doc, "단일 문제", level=1)
+            for q in standalone:
                 score = q.get("score", "?")
                 doc.add_paragraph(
                     f"[{seq}] ({score}pts)  {q.get('content', '')}",
                     style="List Number",
                 )
                 doc.add_paragraph()
+                seq += 1
 
     else:
         # ── 기본 구조 (파트 I / II) ───────────────────────────
-        concept_qs = [q for q in ordered if q.get("type") == "concept"]
-        case_qs    = [q for q in ordered if q.get("type") == "case"]
+        concept_qs = [q for q in questions if q.get("type") == "concept"]
+        case_qs    = [q for q in questions if q.get("type") == "case"]
         seq = 1
 
         if concept_qs:
@@ -180,7 +186,9 @@ def run(state: ExamState) -> dict:
     ts = datetime.now().strftime("%m%d_%H%M")
 
     exam_doc = Document()
-    _build_exam(exam_doc, passed, requirements, state.get("group_scenarios", {}))
+    _build_exam(exam_doc, passed, requirements,
+                state.get("group_config", []),
+                state.get("group_scenarios", {}))
     exam_path = os.path.join(_OUTPUT_DIR, f"exam_{ts}.docx")
     exam_doc.save(exam_path)
     logger.log("Compiler", f"✅ 시험지 저장: {exam_path}")
