@@ -39,6 +39,9 @@ class ExamState(TypedDict):
 
     # ── 블루프린트 (Chair) ─────────────────────────────
     blueprint: Optional[dict]   # 단원별 배점/난이도/유형 분배표
+    _full_blueprint: Optional[dict]  # 최초 확정된 전체 블루프린트
+    _validation_ok: bool            # validate → compiler 진입 가능 여부
+    _needs_answer_regen: bool       # Human Review 수정 후 답안 재생성 필요 여부
 
     # ── 출제 (Professor Meeting) ──────────────────────
     questions: List[Question]
