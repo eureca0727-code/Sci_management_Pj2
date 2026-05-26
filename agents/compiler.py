@@ -44,6 +44,16 @@ def _add_heading(doc: Document, text: str, level: int = 1):
         p.runs[0].font.color.rgb = RGBColor(0, 0, 0)
 
 
+_META_TOKENS = re.compile(
+    r"【[^】]*】|\[[^\]]*시나리오[^\]]*\]|〔[^〕]*〕"
+    r"|대문제\s*\d+[^\n]*\n?|소문항\s*\d+[^\n]*\n?"
+)
+
+def _clean_content(text: str) -> str:
+    """편집용 메타 토큰 제거 후 앞뒤 공백 정리."""
+    return _META_TOKENS.sub("", text).strip()
+
+
 def _build_exam(doc: Document, questions: list[Question], requirements: dict,
                 group_config: list | None = None,
                 group_scenarios: dict | None = None):
@@ -56,7 +66,6 @@ def _build_exam(doc: Document, questions: list[Question], requirements: dict,
 
     if group_config:
         # ── 그룹 구성 ─────────────────────────────────────────
-        # topic → group_id 매핑
         topic_to_gid: dict[str, int] = {}
         for gc in group_config:
             for name in gc["topic_names"]:
@@ -75,7 +84,7 @@ def _build_exam(doc: Document, questions: list[Question], requirements: dict,
         for gid in sorted(grouped):
             chunk = grouped[gid]
             total_score = sum(q.get("score", 0) for q in chunk)
-            _add_heading(doc, f"대문제 {gid + 1}  ({total_score}pts)", level=1)
+            _add_heading(doc, f"{seq}.  ({total_score}pts)", level=1)
 
             scenario = group_scenarios.get(gid)
             if scenario:
@@ -86,23 +95,17 @@ def _build_exam(doc: Document, questions: list[Question], requirements: dict,
 
             for sub_i, q in enumerate(chunk, 1):
                 score = q.get("score", "?")
-                doc.add_paragraph(
-                    f"({sub_i}) ({score}pts)  {q.get('content', '')}",
-                    style="List Number",
-                )
+                content = _clean_content(q.get("content", ""))
+                doc.add_paragraph(f"({sub_i}) ({score}pts)  {content}")
                 doc.add_paragraph()
-            seq += len(chunk)
+            seq += 1
 
-        if standalone:
-            _add_heading(doc, "단일 문제", level=1)
-            for q in standalone:
-                score = q.get("score", "?")
-                doc.add_paragraph(
-                    f"[{seq}] ({score}pts)  {q.get('content', '')}",
-                    style="List Number",
-                )
-                doc.add_paragraph()
-                seq += 1
+        for q in standalone:
+            score = q.get("score", "?")
+            content = _clean_content(q.get("content", ""))
+            doc.add_paragraph(f"{seq}. ({score}pts)  {content}")
+            doc.add_paragraph()
+            seq += 1
 
     else:
         # ── 기본 구조 (파트 I / II / III) ────────────────────
@@ -115,8 +118,8 @@ def _build_exam(doc: Document, questions: list[Question], requirements: dict,
             _add_heading(doc, "Part I — Short Answer Questions")
             for q in sa_qs:
                 score = q.get("score", "?")
-                doc.add_paragraph(f"[{seq}] ({score}pts)  {q.get('content', '')}",
-                                   style="List Number")
+                content = _clean_content(q.get("content", ""))
+                doc.add_paragraph(f"{seq}. ({score}pts)  {content}")
                 doc.add_paragraph()
                 seq += 1
 
@@ -124,8 +127,8 @@ def _build_exam(doc: Document, questions: list[Question], requirements: dict,
             _add_heading(doc, "Part II — Essay Questions")
             for q in essay_qs:
                 score = q.get("score", "?")
-                doc.add_paragraph(f"[{seq}] ({score}pts)  {q.get('content', '')}",
-                                   style="List Number")
+                content = _clean_content(q.get("content", ""))
+                doc.add_paragraph(f"{seq}. ({score}pts)  {content}")
                 doc.add_paragraph()
                 seq += 1
 
@@ -133,8 +136,8 @@ def _build_exam(doc: Document, questions: list[Question], requirements: dict,
             _add_heading(doc, "Part III — Application Questions")
             for q in app_qs:
                 score = q.get("score", "?")
-                doc.add_paragraph(f"[{seq}] ({score}pts)  {q.get('content', '')}",
-                                   style="List Number")
+                content = _clean_content(q.get("content", ""))
+                doc.add_paragraph(f"{seq}. ({score}pts)  {content}")
                 doc.add_paragraph()
                 seq += 1
 
