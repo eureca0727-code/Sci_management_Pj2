@@ -59,7 +59,7 @@ def parse_topics(raw_topics: list[str]) -> list[dict]:
 
 
 def build_state(pdf_path: str, total_score: int, format_counts: dict,
-                user_topics, additional_requirements) -> ExamState:
+                user_topics, additional_requirements, app_groups=None) -> ExamState:
     total_questions = sum(format_counts.values())
     return {
         "pdf_path": pdf_path,
@@ -69,6 +69,7 @@ def build_state(pdf_path: str, total_score: int, format_counts: dict,
             "total_questions": total_questions,
             "user_topics": user_topics,
             "additional_requirements": additional_requirements,
+            "app_groups": app_groups or [],
         },
         "blueprint": None,
         "questions": [],
@@ -121,6 +122,7 @@ def main():
             format_counts=cfg["format_counts"],
             user_topics=cfg["user_topics"],
             additional_requirements=cfg["additional_requirements"],
+            app_groups=cfg.get("app_groups", []),
         )
 
     # ── CLI 모드: --pdf 지정 ──────────────────────────────

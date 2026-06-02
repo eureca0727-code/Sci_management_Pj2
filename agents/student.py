@@ -10,10 +10,18 @@ import logger
 _client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
 
+def _full_question_text(question: Question) -> str:
+    """scenario 필드가 분리된 경우 합쳐서 반환, 없으면 content만."""
+    scenario = (question.get("scenario") or "").strip()
+    content = (question.get("content") or "").strip()
+    if scenario:
+        return f"{scenario}\n\n{content}"
+    return content
+
+
 def _solve_grounded(question: Question, run_index: int) -> StudentSolution:
-    content = question.get("content", "")
-    # 검색어: 단원명 우선, 없으면 문제 앞부분 — 시나리오 텍스트보다 정확하게 검색됨
-    search_query = question.get("topic") or content[:100]
+    full_text = _full_question_text(question)
+    search_query = question.get("topic") or full_text[:100]
     slides = retrieve(search_query, top_k=config.TOP_K)
     context = format_context(slides)
 
@@ -25,7 +33,7 @@ def _solve_grounded(question: Question, run_index: int) -> StudentSolution:
             "role": "user",
             "content": STUDENT_GROUNDED.format(
                 context=context,
-                question=content,
+                question=full_text,
             ),
         }],
     )

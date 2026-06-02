@@ -33,8 +33,13 @@ def run(state: ExamState) -> dict:
         logger.log("AnswerGen", f"[{q['id']}] 모범답안 생성 중...")
         best = _best_grounded(grounded_map[q["id"]])
         best_answer_text = best["answer"][:600] if best else "(학생 풀이 없음)"
-        slides = get_slides_by_numbers(q.get("source_slides", []))
+        # intended_answer가 이미 있으므로 슬라이드는 최대 2개만 참조
+        slides = get_slides_by_numbers(q.get("source_slides", [])[:2])
         slide_text = format_context(slides)
+
+        scenario = (q.get("scenario") or "").strip()
+        content = (q.get("content") or "").strip()
+        full_question = f"{scenario}\n\n{content}" if scenario else content
 
         response = cached_create(
             _client,
@@ -43,7 +48,7 @@ def run(state: ExamState) -> dict:
             messages=[{
                 "role": "user",
                 "content": ANSWER_GENERATOR.format(
-                    question=q.get("content", ""),
+                    question=full_question,
                     intended_answer=q.get("intended_answer", ""),
                     best_student_answer=best_answer_text,
                     slide_excerpts=slide_text,
@@ -98,4 +103,4 @@ def run(state: ExamState) -> dict:
         )
 
     logger.log("AnswerGen", f"✅ 모범답안 {len(model_answers)}개 생성 완료")
-    return {"model_answers": model_answers}
+    return {"model_answers": model_answers, "_needs_answer_regen": False}

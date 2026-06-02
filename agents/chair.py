@@ -1,4 +1,5 @@
 import json
+from collections import defaultdict
 import anthropic
 from state import ExamState, Question
 from prompts.templates import CHAIR_BLUEPRINT, CHAIR_CONSENSUS
@@ -109,16 +110,17 @@ def run_consensus(state: ExamState) -> dict:
     if failure_patterns:
         logger.log("Chair", f"⚠️  회피 패턴 {len(failure_patterns)}개 적용 중")
 
-    # Send numbered draft list so Claude can reference by index
+    # Chair는 채택/탈락 선별만 하므로 heavy 필드 제거 (intended_answer, scenario는 미전송)
+    _CHAIR_KEYS = {"index", "type", "topic", "content", "score", "methodology", "difficulty"}
     numbered_drafts = [
-        {"index": i, **{k: v for k, v in q.items()}}
+        {k: v for k, v in {"index": i, **q}.items() if k in _CHAIR_KEYS}
         for i, q in enumerate(all_drafts)
     ]
 
     response = cached_create(
         _client,
-        model=config.MODEL,
-        max_tokens=3000,
+        model=config.HAIKU_MODEL,
+        max_tokens=1000,
         system=CHAIR_CONSENSUS,
         messages=[{
             "role": "user",
@@ -184,6 +186,33 @@ def run_consensus(state: ExamState) -> dict:
             reason = r.get("reason", "?")
             label = all_drafts[idx].get("content", "?")[:50] if isinstance(idx, int) and idx < len(all_drafts) else "?"
             logger.log("Chair", f"  ❌ [{idx}] {label}... — {reason}")
+
+    # Blueprint quota enforcement: never exceed per-topic-type quotas
+    full_blueprint = state.get("_full_blueprint") or state.get("blueprint") or {}
+    topic_quotas: dict[tuple, int] = {}
+    for t in full_blueprint.get("topics", []):
+        name = t.get("name", "")
+        topic_quotas[(name, "short_answer")]  = int(t.get("short_answer_questions", 0))
+        topic_quotas[(name, "essay")]         = int(t.get("essay_questions", 0))
+        topic_quotas[(name, "application")]   = int(t.get("application_questions", 0))
+
+    already_counts: dict[tuple, int] = defaultdict(int)
+    for q in existing_questions:
+        already_counts[(q.get("topic", ""), q.get("type", ""))] += 1
+
+    capped: list[Question] = []
+    new_counts: dict[tuple, int] = defaultdict(int)
+    for q in questions:
+        key = (q.get("topic", ""), q.get("type", ""))
+        quota = topic_quotas.get(key, 9999)
+        if already_counts[key] + new_counts[key] < quota:
+            capped.append(q)
+            new_counts[key] += 1
+        else:
+            logger.log("Chair", f"  ⛔ 쿼터 초과 제거: [{q.get('id','?')}] "
+                                f"{q.get('topic','?')}:{q.get('type','?')} "
+                                f"({already_counts[key] + new_counts[key]}/{quota})")
+    questions = capped
 
     logger.log("Chair", f"✅ 합의 완료: 채택 {len(questions)}개 / 탈락 {len(rejected_entries)}개")
 

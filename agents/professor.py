@@ -1,3 +1,4 @@
+import re
 import json
 import anthropic
 from state import ExamState
@@ -7,10 +8,12 @@ from utils import parse_json, cached_create
 import config
 import logger
 
+_MULTI_SUB = re.compile(r'\(문제\s*[1-9]|\(소\s*[1-9]|^문제\s*[1-9][).]\s', re.MULTILINE)
+
 
 def _normalize(q: dict) -> dict:
     """LLM이 문자열 필드를 dict/list로 줄 경우 안전하게 변환."""
-    for key in ("content", "intended_answer", "methodology", "topic"):
+    for key in ("content", "intended_answer", "methodology", "topic", "scenario"):
         val = q.get(key)
         if val is not None and not isinstance(val, str):
             q[key] = json.dumps(val, ensure_ascii=False)
@@ -31,8 +34,11 @@ def _is_valid(q: dict) -> bool:
     if any(token in content for token in forbidden):
         return False
 
-    # LLM이 대문제 헤더를 content에 직접 넣는 경우 거름
     if content.startswith("대문제"):
+        return False
+
+    # 복수 소문항 구조 금지: (문제 1), (문제 2), (소1) 등이 있으면 단일 문제가 아님
+    if _MULTI_SUB.search(content):
         return False
 
     return True
@@ -121,7 +127,8 @@ def _generate_essay(blueprint: dict, topic: dict, failure_patterns: list,
 def _generate_application(blueprint: dict, topic: dict, failure_patterns: list,
                           additional_requirements: str = "",
                           retry_count: int = 0,
-                          topic_failure_reason: str = "") -> list:
+                          topic_failure_reason: str = "",
+                          shared_scenario: str = "") -> list:
     top_k = _adaptive_top_k(retry_count)
     methodology_slides = retrieve(f"{topic['name']} 방법론 절차 분석 framework", top_k=top_k)
     methodology_context = format_context(methodology_slides)
@@ -132,6 +139,7 @@ def _generate_application(blueprint: dict, topic: dict, failure_patterns: list,
         failure_patterns=failure_patterns or "없음",
         additional_requirements=additional_requirements or "없음",
         topic_failure_reason=topic_failure_reason or "없음",
+        shared_scenario=shared_scenario or "없음",
     )
 
     response = cached_create(
@@ -144,10 +152,19 @@ def _generate_application(blueprint: dict, topic: dict, failure_patterns: list,
     logger.record_tokens("ProfB", response.usage)
 
     raw = parse_json(response.content[0].text)
+    if raw is None:
+        logger.log("ProfB", "  ⚠️  parse_json 실패 — LLM 응답을 JSON으로 파싱 불가")
+        return []
     if isinstance(raw, dict):
         raw = [raw]
+    before_valid = len([q for q in raw if isinstance(q, dict)])
     raw = [_normalize(q) for q in raw if isinstance(q, dict) and _is_valid(q)]
-    raw = [q for q in raw if q.get("methodology") and str(q["methodology"]).strip()]
+    if len(raw) < before_valid:
+        logger.log("ProfB", f"  ⚠️  _is_valid 필터: {before_valid}개 → {len(raw)}개 (content 오류)")
+    for q in raw:
+        if not (q.get("methodology") and str(q["methodology"]).strip()):
+            logger.log("ProfB", f"  ⚠️  methodology 누락 — 빈 값으로 통과: {q.get('content','')[:60]}")
+            q["methodology"] = ""
     for q in raw:
         q["professor"] = "B"
         q["type"] = "application"
@@ -177,6 +194,9 @@ def run_professor_a(state: ExamState) -> dict:
                 logger.log("ProfA", f"  📋 실패 피드백 적용: {reason[:80]}")
             logger.log("ProfA", f"단원 '{topic['name']}' 단답형 {sa_count}개 출제 중...")
             questions = _generate_short_answer(blueprint, topic, failure_patterns, additional, retry_count + fill_count, reason)
+            if len(questions) > sa_count:
+                logger.log("ProfA", f"  ✂️  단답형 {len(questions)}개 → {sa_count}개로 trim")
+                questions = questions[:sa_count]
             for q in questions:
                 q["topic"] = topic["name"]
                 logger.log("ProfA", f"  → [단답형] {q.get('content','')[:70]}...")
@@ -188,6 +208,9 @@ def run_professor_a(state: ExamState) -> dict:
                 logger.log("ProfA", f"  📋 실패 피드백 적용: {reason[:80]}")
             logger.log("ProfA", f"단원 '{topic['name']}' 서술형 {essay_count}개 출제 중...")
             questions = _generate_essay(blueprint, topic, failure_patterns, additional, retry_count + fill_count, reason)
+            if len(questions) > essay_count:
+                logger.log("ProfA", f"  ✂️  서술형 {len(questions)}개 → {essay_count}개로 trim")
+                questions = questions[:essay_count]
             for q in questions:
                 q["topic"] = topic["name"]
                 logger.log("ProfA", f"  → [서술형] {q.get('content','')[:70]}...")
@@ -205,6 +228,7 @@ def run_professor_b(state: ExamState) -> dict:
     retry_count = state.get("retry_count", 0)
     fill_count = state.get("fill_count", 0)
     topic_failure_reasons = state.get("_topic_failure_reasons", {})
+    group_scenarios = state.get("group_scenarios", {})
     top_k = _adaptive_top_k(retry_count, fill_count)
     if retry_count > 0 or fill_count > 0:
         logger.log("ProfB", f"재출제 {retry_count}회차 / fill {fill_count}회차 → TOP_K={top_k}")
@@ -216,8 +240,19 @@ def run_professor_b(state: ExamState) -> dict:
             reason = topic_failure_reasons.get(f"{topic['name']}:application", "")
             if reason:
                 logger.log("ProfB", f"  📋 실패 피드백 적용: {reason[:80]}")
+            gid = topic.get("group_id")
+            if gid is not None:
+                gid = int(gid)  # LLM이 string "0"으로 반환해도 int 키와 매칭되게
+            shared = group_scenarios.get(gid, "") if gid is not None else ""
+            if shared:
+                logger.log("ProfB", f"  📌 공통 시나리오 주입: {shared[:60]}...")
             logger.log("ProfB", f"단원 '{topic['name']}' 사례적용형 {app_count}개 출제 중...")
-            questions = _generate_application(blueprint, topic, failure_patterns, additional, retry_count + fill_count, reason)
+            questions = _generate_application(blueprint, topic, failure_patterns, additional,
+                                              retry_count + fill_count, reason,
+                                              shared_scenario=shared)
+            if len(questions) > app_count:
+                logger.log("ProfB", f"  ✂️  사례적용형 {len(questions)}개 → {app_count}개로 trim")
+                questions = questions[:app_count]
             for q in questions:
                 q["topic"] = topic["name"]
                 logger.log("ProfB", f"  → [사례적용형] {q.get('content','')[:70]}...")

@@ -10,3 +10,9 @@ lecture/
 .cache/
 exams/
 logs/
+test_pdf.py
+tools/web_search.py
+fix_conclusion.py
+generate_report.py
+report_draft.docx
+test_compiler.py

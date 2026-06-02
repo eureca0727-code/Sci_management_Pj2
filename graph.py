@@ -1,7 +1,7 @@
 from collections import defaultdict
 from langgraph.graph import StateGraph, END
 from state import ExamState
-from agents import indexer, chair, professor, student, judge, answer_gen, human_review, scenario_gen, blueprint_review, compiler
+from agents import indexer, chair, professor, student, judge, answer_gen, human_review, scenario_pregen, blueprint_review, compiler
 import config
 import logger
 
@@ -178,6 +178,7 @@ def node_fill_check(state: ExamState) -> dict:
                 "application_questions": short_app,
             })
 
+    logger.section("STEP 4 — Fill Check")
     logger.log(
         "Graph",
         f"[Fill Check] {total_current}/{total_required} 문항 확보"
@@ -277,8 +278,7 @@ def node_score_normalize(state: ExamState) -> dict:
     required_score = int(req.get("total_score", 100))
 
     if len(passed) != required_total:
-        logger.log("Score", f"⚠️  점수 보정 보류: 문제 수 {len(passed)}/{required_total}")
-        return {"questions": passed}
+        logger.log("Score", f"⚠️  문제 수 불일치: {len(passed)}/{required_total} — 점수는 {required_score}점으로 보정")
 
     before = sum(int(q.get("score", 0)) for q in passed)
     normalized = _normalize_question_scores(passed, required_score)
@@ -302,8 +302,8 @@ def node_human_review(state: ExamState) -> dict:
     return human_review.run(state)
 
 
-def node_scenario_gen(state: ExamState) -> dict:
-    return scenario_gen.run(state)
+def node_scenario_pregen(state: ExamState) -> dict:
+    return scenario_pregen.run(state)
 
 
 def node_validate(state: ExamState) -> dict:
@@ -402,33 +402,34 @@ def after_validate(state: ExamState) -> str:
 def build_graph() -> StateGraph:
     g = StateGraph(ExamState)
 
-    g.add_node("index",         node_index)
-    g.add_node("blueprint",         node_blueprint)
-    g.add_node("blueprint_review",  node_blueprint_review)
-    g.add_node("professor_a",       node_professor_a)
-    g.add_node("professor_b",   node_professor_b)
-    g.add_node("consensus",     node_consensus)
-    g.add_node("fill_check",    node_fill_check)
-    g.add_node("student",       node_student)
-    g.add_node("judge",         node_judge)
-    g.add_node("retry_prepare", node_retry_prepare)
-    g.add_node("score_normalize", node_score_normalize)
-    g.add_node("validate",      node_validate)
-    g.add_node("answer_gen",    node_answer_gen)
-    g.add_node("human_review",  node_human_review)
-    g.add_node("scenario_gen",  node_scenario_gen)
-    g.add_node("compiler",      node_compiler)
+    g.add_node("index",            node_index)
+    g.add_node("blueprint",        node_blueprint)
+    g.add_node("blueprint_review", node_blueprint_review)
+    g.add_node("scenario_pregen",  node_scenario_pregen)
+    g.add_node("professor_a",      node_professor_a)
+    g.add_node("professor_b",      node_professor_b)
+    g.add_node("consensus",        node_consensus)
+    g.add_node("fill_check",       node_fill_check)
+    g.add_node("student",          node_student)
+    g.add_node("judge",            node_judge)
+    g.add_node("retry_prepare",    node_retry_prepare)
+    g.add_node("score_normalize",  node_score_normalize)
+    g.add_node("validate",         node_validate)
+    g.add_node("answer_gen",       node_answer_gen)
+    g.add_node("human_review",     node_human_review)
+    g.add_node("compiler",         node_compiler)
 
-    # 초기 흐름
+    # 초기 흐름: 시나리오를 교수 출제 전에 먼저 생성
     g.set_entry_point("index")
     g.add_edge("index",            "blueprint")
     g.add_edge("blueprint",        "blueprint_review")
-    g.add_edge("blueprint_review", "professor_a")
-    g.add_edge("professor_a", "professor_b")
-    g.add_edge("professor_b", "consensus")
-    g.add_edge("consensus",   "fill_check")
-    g.add_edge("student",     "judge")
-    g.add_edge("score_normalize", "answer_gen")
+    g.add_edge("blueprint_review", "scenario_pregen")
+    g.add_edge("scenario_pregen",  "professor_a")
+    g.add_edge("professor_a",      "professor_b")
+    g.add_edge("professor_b",      "consensus")
+    g.add_edge("consensus",        "fill_check")
+    g.add_edge("student",          "judge")
+    g.add_edge("score_normalize",  "answer_gen")
 
     # fill_check 조건부 엣지: 부족하면 교수 재출제, 충분하면 학생으로
     g.add_conditional_edges(
@@ -443,11 +444,16 @@ def build_graph() -> StateGraph:
     # Judge 재출제 흐름
     g.add_edge("retry_prepare", "professor_a")
 
-    # 완료 흐름
-    g.add_edge("answer_gen",    "human_review")
-    g.add_edge("human_review",  "scenario_gen")
-    g.add_edge("scenario_gen",  "validate")
-    g.add_edge("compiler",   END)
+    # 완료 흐름 (scenario_gen 제거 — 시나리오는 이미 pregen에서 생성됨)
+    g.add_edge("answer_gen", "human_review")
+
+    # 수정된 문제가 있으면 answer_gen 재실행, 없으면 바로 validate
+    g.add_conditional_edges(
+        "human_review",
+        lambda s: "answer_gen" if s.get("_needs_answer_regen") else "validate",
+        {"answer_gen": "answer_gen", "validate": "validate"},
+    )
+    g.add_edge("compiler",     END)
 
     # 조건부 엣지
     g.add_conditional_edges(

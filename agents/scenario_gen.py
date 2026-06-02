@@ -9,8 +9,10 @@ _client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
 
 def _generate_scenario(questions: list[dict]) -> str:
+    # 질문 미리보기: scenario 필드가 있으면 그 일부를 보여주고, 없으면 content 앞부분
     subq_text = "\n".join(
-        f"{i+1}. [{q.get('type','?')}] {q.get('content', '')[:200]}"
+        f"{i+1}. [{q.get('type','?')}] "
+        + (q.get("scenario") or q.get("content", ""))[:200]
         for i, q in enumerate(questions)
     )
     response = cached_create(

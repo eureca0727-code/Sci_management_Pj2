@@ -5,6 +5,7 @@ class Question(TypedDict):
     id: str
     type: str             # "short_answer" | "essay" | "application"
     topic: str
+    scenario: Optional[str]      # application 문제 배경 사례 (그룹 공통 or 단독)
     content: str
     intended_answer: str
     methodology: Optional[str]   # application 문제만

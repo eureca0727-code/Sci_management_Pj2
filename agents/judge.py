@@ -24,8 +24,8 @@ def _judge_question(
 
     response = cached_create(
         _client,
-        model=config.MODEL,
-        max_tokens=1000,
+        model=config.HAIKU_MODEL,
+        max_tokens=600,
         messages=[{
             "role": "user",
             "content": JUDGE.format(
@@ -49,9 +49,10 @@ def _judge_question(
 
     q_type = question.get("type", "short_answer")
     answer_match       = float(raw.get("answer_match", 0.0))
-    ambiguity_score    = float(raw.get("ambiguity_score", 0.0))
     lecture_dependency = float(raw.get("lecture_dependency", 0.0))
     citation_jaccard   = float(raw.get("citation_jaccard", 0.0))
+    # 풀이가 1개면 run 간 불일치율 측정 불가 → 0.0으로 고정
+    ambiguity_score = 0.0 if len(grounded) <= 1 else float(raw.get("ambiguity_score", 0.0))
 
     # 지표가 기준을 충족하면 LLM 판정과 무관하게 pass
     if q_type == "short_answer":
@@ -166,4 +167,5 @@ def run(state: ExamState) -> dict:
         "failure_patterns": new_failure_patterns,
         "_rescue_pool": rescue_pool,
         "_topic_failure_reasons": topic_failure_reasons,
+        "_accepted_questions": all_passed,  # Fill Check가 실패 문제를 다시 세지 않도록 동기화
     }

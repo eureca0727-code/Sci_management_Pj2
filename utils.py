@@ -2,6 +2,7 @@ import re
 import json
 import hashlib
 import os
+import time
 from json_repair import repair_json
 
 _CACHE_DIR = ".cache/llm"
@@ -51,7 +52,20 @@ def cached_create(client, **kwargs):
             pass  # 캐시 파일 손상 시 재호출
 
     os.makedirs(_CACHE_DIR, exist_ok=True)
-    response = client.messages.create(**kwargs)
+    # 일시적 네트워크 오류에 대해 최대 3회 재시도 (2s → 4s → 8s)
+    last_exc = None
+    for attempt in range(3):
+        try:
+            response = client.messages.create(**kwargs)
+            break
+        except Exception as e:
+            last_exc = e
+            wait = 2 ** (attempt + 1)
+            print(f"\n  ⚠️  API 오류 (시도 {attempt + 1}/3): {e.__class__.__name__} — {wait}초 후 재시도...")
+            time.sleep(wait)
+    else:
+        raise last_exc
+
     try:
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"text": response.content[0].text}, f, ensure_ascii=False, indent=2)

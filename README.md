@@ -14,11 +14,12 @@ flowchart TD
         index["🔍 슬라이드 색인\n(Indexer)"]
         blueprint["📋 블루프린트 생성\n(Chair)"]
         review["👤 블루프린트 검토\n사용자 자연어 수정"]
+        pregen["🎬 공통 시나리오 선행 생성\n(그룹 있을 때만)"]
     end
 
     subgraph DRAFT ["✏️ 출제"]
-        profA["🧑‍🏫 교수 A\n개념 문제 출제"]
-        profB["🧑‍🏫 교수 B\n사례 문제 출제"]
+        profA["🧑‍🏫 교수 A\n단답형·서술형 출제"]
+        profB["🧑‍🏫 교수 B\n사례적용형 출제\n(공통 시나리오 주입)"]
         consensus["🪑 합의\n(Chair)"]
         fill{"📊 문제 수\n충분?"}
     end
@@ -33,14 +34,13 @@ flowchart TD
         score["🔢 점수 정규화"]
         ansgen["📝 모범답안 생성\n(AnswerGen)"]
         human["👤 최종 검토\n사람이 수정·삭제"]
-        scenario["🎬 공통 시나리오 생성\n(대문제 그룹용)"]
         validate{"✅ 최종 검증"}
         compiler["📦 시험지 출력\n(Compiler)"]
     end
 
     END([🏁 완료\nexams/ 폴더])
 
-    index --> blueprint --> review --> profA
+    index --> blueprint --> review --> pregen --> profA
     profA --> profB --> consensus --> fill
 
     fill -->|"부족 (최대 3회)"| profA
@@ -48,11 +48,11 @@ flowchart TD
 
     student --> judge
 
-    judge -->|"실패 → 재출제 (최대 10회)"| retry --> profA
+    judge -->|"실패 → 재출제 (최대 3회)"| retry --> profA
     judge -->|"PASS지만 문제 수 부족"| fill
     judge -->|통과| score
 
-    score --> ansgen --> human --> scenario --> validate
+    score --> ansgen --> human --> validate
 
     validate -->|"✅ OK"| compiler --> END
     validate -->|"문제 수 부족"| fill
@@ -62,18 +62,18 @@ flowchart TD
     style START fill:#4CAF50,color:#fff
     style END   fill:#4CAF50,color:#fff
 
-    style index    fill:#2196F3,color:#fff
+    style index     fill:#2196F3,color:#fff
     style blueprint fill:#2196F3,color:#fff
-    style profA    fill:#2196F3,color:#fff
-    style profB    fill:#2196F3,color:#fff
+    style pregen    fill:#2196F3,color:#fff
+    style profA     fill:#2196F3,color:#fff
+    style profB     fill:#2196F3,color:#fff
     style consensus fill:#2196F3,color:#fff
-    style student  fill:#2196F3,color:#fff
-    style judge    fill:#2196F3,color:#fff
-    style retry    fill:#FF9800,color:#fff
-    style score    fill:#2196F3,color:#fff
-    style ansgen   fill:#2196F3,color:#fff
-    style scenario fill:#2196F3,color:#fff
-    style compiler fill:#2196F3,color:#fff
+    style student   fill:#2196F3,color:#fff
+    style judge     fill:#2196F3,color:#fff
+    style retry     fill:#FF9800,color:#fff
+    style score     fill:#2196F3,color:#fff
+    style ansgen    fill:#2196F3,color:#fff
+    style compiler  fill:#2196F3,color:#fff
 
     style review  fill:#9C27B0,color:#fff
     style human   fill:#9C27B0,color:#fff
@@ -90,6 +90,63 @@ flowchart TD
 
 ---
 
+## 대문제 그룹화 규칙
+
+실행 시 인터랙티브 마법사에서 사례출제형 그룹 패턴을 숫자로 입력합니다.
+
+```
+사례출제형 문제 수: 4
+그룹 구성 입력 (합계 4): 2,2
+```
+
+- `2,2` → 2문제씩 두 그룹 (공통 시나리오 2개)
+- `4` → 전체 한 그룹 (공통 시나리오 1개)
+- Enter → 모두 독립 문제
+
+블루프린트 생성 후에는 어떤 단원들을 묶을지 단원 번호로 재배정할 수 있습니다.
+
+### ✅ 올바른 그룹화 — 사례적용형끼리만
+
+```
+대문제 1.
+  다음 사례를 읽고 아래 물음에 답하시오.
+  [A기업은 PCB 불량률 문제를 겪고 있으며...]
+
+  1. (12pts)  위 사례를 KJ method를 이용하여 문제를 분류하시오.
+  2. (13pts)  위 사례에 PDCA 사이클을 적용한 개선안을 제시하시오.
+```
+
+→ 공통 시나리오가 두 질문 모두와 자연스럽게 연결됩니다.
+
+### ❌ 잘못된 그룹화 — 타입 혼합
+
+```
+대문제 1.
+  다음 사례를 읽고 아래 물음에 답하시오.
+  [A기업 시나리오...]
+
+  1. (10pts)  테일러리즘의 핵심 원리 3가지를 서술하시오.  ← 단답형, 시나리오 무관
+  2. (15pts)  위 사례에 KJ method를 적용하시오.
+```
+
+→ (1)번 질문은 시나리오와 무관해 출제 의도가 불명확해집니다.
+
+> **규칙**: 대문제 그룹은 **사례적용형(application) 단원끼리만** 묶으세요.
+
+### 단독 사례 문제 (그룹 없이)
+
+그룹화 없이 사례적용형 단독 문제도 생성 가능합니다:
+
+```
+3. (25pts)
+  다음 사례를 읽고 물음에 답하시오.
+  [B팀은 신제품 출시를 앞두고...]
+
+  위 사례를 참고하여 린 스타트업 방법론을 적용한 MVP 전략을 제시하시오.
+```
+
+---
+
 ## 실행 방법
 
 ```bash
@@ -97,7 +154,7 @@ flowchart TD
 python main.py
 
 # CLI 모드
-python main.py --pdf lecture --total 100 --questions 8
+python main.py --pdf lecture --total 100 --short-answer 3 --essay 3 --application 4
 ```
 
 lecture/ 폴더에 PDF를 넣고 실행하면 됩니다.
