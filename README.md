@@ -147,17 +147,25 @@ flowchart TD
 
 ---
 
-## 실행 방법
+## 설치 및 실행
 
 ```bash
-# 인터랙티브 모드 (권장)
+# 1. 패키지 설치
+pip install -r requirements.txt
+
+# 2. API 키 설정 (.env 파일 생성)
+echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
+
+# 3. 강의 PDF를 lecture/ 폴더에 추가
+
+# 4. 실행 (인터랙티브 모드 권장)
 python main.py
 
 # CLI 모드
 python main.py --pdf lecture --total 100 --short-answer 3 --essay 3 --application 4
 ```
 
-lecture/ 폴더에 PDF를 넣고 실행하면 됩니다.
+Python 3.11 이상 필요.
 
 ---
 
