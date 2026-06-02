@@ -51,10 +51,10 @@ def _judge_question(
     answer_match       = float(raw.get("answer_match", 0.0))
     lecture_dependency = float(raw.get("lecture_dependency", 0.0))
     citation_jaccard   = float(raw.get("citation_jaccard", 0.0))
-    # 풀이가 1개면 run 간 불일치율 측정 불가 → 0.0으로 고정
+    # Ambiguity requires multiple runs to measure; force 0.0 when STUDENT_RUNS == 1
     ambiguity_score = 0.0 if len(grounded) <= 1 else float(raw.get("ambiguity_score", 0.0))
 
-    # 지표가 기준을 충족하면 LLM 판정과 무관하게 pass
+    # A question passes if EITHER the LLM says pass OR all numeric thresholds are met
     if q_type == "short_answer":
         metrics_pass = (answer_match >= config.SHORT_ANSWER_MATCH_MIN
                         and ambiguity_score <= config.AMBIGUITY_MAX)
@@ -107,7 +107,7 @@ def run(state: ExamState) -> dict:
                 key = f"{q.get('topic','?')}:{q.get('type','?')}"
                 topic_failure_reasons[key] = result["failure_reason"]
 
-    # 이전 라운드에서 통과한 문제를 유지 (재출제 시 누적)
+    # Carry forward questions that passed in previous retry/fill rounds
     current_ids = {q["id"] for q in questions}
     previously_passed = [
         q for q in state.get("passed_questions", [])
@@ -115,7 +115,7 @@ def run(state: ExamState) -> dict:
     ]
     all_passed = previously_passed + passed
 
-    # rescue pool 갱신: 실패 문제 중 topic:type별 최고 answer_match 보관
+    # Keep the best-scoring failed question per topic:type as a last-resort fallback
     result_map = {r["question_id"]: r for r in results}
     rescue_pool = list(state.get("_rescue_pool", []))
     pool_index = {
@@ -136,7 +136,7 @@ def run(state: ExamState) -> dict:
     retries = state.get("retry_count", 0)
     required_total = int(state.get("requirements", {}).get("total_questions", 0))
 
-    # retry 소진 시 부족한 문제를 rescue pool에서 최고점수 순으로 강제 통과
+    # Retries exhausted: promote best rescue-pool candidates to fill the required question count
     if retries >= config.MAX_RETRIES and len(all_passed) < required_total and rescue_pool:
         passed_ids = {q["id"] for q in all_passed}
         candidates = sorted(

@@ -54,7 +54,7 @@ def _topic_for_professor(topic: dict) -> dict:
 
 
 def _adaptive_top_k(retry_count: int, fill_count: int = 0) -> int:
-    """재출제·fill 횟수에 비례해 TOP_K를 늘림 (토큰 절약 + 근거 확장 + 캐시 키 변경)."""
+    """Expand RAG search window on each retry/fill round to avoid re-reading the same slides."""
     return min(config.TOP_K + (retry_count + fill_count) * 2, config.TOP_K_MAX)
 
 
@@ -62,6 +62,7 @@ def _generate_short_answer(blueprint: dict, topic: dict, failure_patterns: list,
                            additional_requirements: str = "",
                            retry_count: int = 0,
                            topic_failure_reason: str = "") -> list:
+    # Retrieve relevant lecture slides via RAG, then prompt LLM for short-answer questions
     slides = retrieve(topic["name"], top_k=_adaptive_top_k(retry_count))
     context = format_context(slides)
 
@@ -129,6 +130,7 @@ def _generate_application(blueprint: dict, topic: dict, failure_patterns: list,
                           retry_count: int = 0,
                           topic_failure_reason: str = "",
                           shared_scenario: str = "") -> list:
+    # Search methodology-specific slides; inject pre-generated shared_scenario for grouped questions
     top_k = _adaptive_top_k(retry_count)
     methodology_slides = retrieve(f"{topic['name']} 방법론 절차 분석 framework", top_k=top_k)
     methodology_context = format_context(methodology_slides)
@@ -194,6 +196,7 @@ def run_professor_a(state: ExamState) -> dict:
                 logger.log("ProfA", f"  📋 실패 피드백 적용: {reason[:80]}")
             logger.log("ProfA", f"단원 '{topic['name']}' 단답형 {sa_count}개 출제 중...")
             questions = _generate_short_answer(blueprint, topic, failure_patterns, additional, retry_count + fill_count, reason)
+            # Hard-trim to exact blueprint count; LLM sometimes over-generates
             if len(questions) > sa_count:
                 logger.log("ProfA", f"  ✂️  단답형 {len(questions)}개 → {sa_count}개로 trim")
                 questions = questions[:sa_count]

@@ -252,7 +252,7 @@ def after_fill_check(state: ExamState) -> str:
     return "fill" if state.get("_needs_fill", False) else "student"
 
 def _normalize_question_scores(questions: list[dict], total_score: int) -> list[dict]:
-    """최종 문제 수 기준으로 총점을 정확히 total_score에 맞춤."""
+    """Distribute total_score evenly across questions, spreading the remainder one point at a time."""
     if not questions:
         return questions
 
@@ -357,6 +357,7 @@ def node_compiler(state: ExamState) -> dict:
 # ── 조건부 엣지 ───────────────────────────────────────────────────
 
 def after_judge(state: ExamState) -> str:
+    """Route after Judge: retry if questions failed, fill if count short, else proceed to scoring."""
     failed = state.get("failed_questions", [])
     retries = state.get("retry_count", 0)
 
@@ -400,6 +401,7 @@ def after_validate(state: ExamState) -> str:
 # ── 그래프 조립 ───────────────────────────────────────────────────
 
 def build_graph() -> StateGraph:
+    """Assemble the LangGraph StateGraph: register all agent nodes and define conditional routing edges."""
     g = StateGraph(ExamState)
 
     g.add_node("index",            node_index)

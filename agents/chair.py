@@ -100,7 +100,7 @@ def run_consensus(state: ExamState) -> dict:
     prof_b = state.get("_draft_b", [])
     failure_patterns = state.get("failure_patterns", [])
 
-    # Combine drafts and assign sequential indices for index-based selection
+    # Merge drafts from both professors; Chair selects by index to avoid re-serializing heavy fields
     all_drafts = list(prof_a) + list(prof_b)
     logger.log("Chair", f"A 초안 {len(prof_a)}개 + B 초안 {len(prof_b)}개 검토 중...")
     if not all_drafts:
@@ -144,7 +144,7 @@ def run_consensus(state: ExamState) -> dict:
     elif isinstance(raw, list):
         kept_entries = raw
 
-    # Offset IDs so fill/retry questions never collide with previously accepted IDs.
+    # Offset new question IDs to prevent collision with IDs already accepted in prior rounds
     existing_questions = (
        state.get("_accepted_questions", [])
        or state.get("passed_questions", [])
@@ -187,7 +187,7 @@ def run_consensus(state: ExamState) -> dict:
             label = all_drafts[idx].get("content", "?")[:50] if isinstance(idx, int) and idx < len(all_drafts) else "?"
             logger.log("Chair", f"  ❌ [{idx}] {label}... — {reason}")
 
-    # Blueprint quota enforcement: never exceed per-topic-type quotas
+    # Quota enforcement: drop any question that exceeds the per-topic-per-type limit set in the blueprint
     full_blueprint = state.get("_full_blueprint") or state.get("blueprint") or {}
     topic_quotas: dict[tuple, int] = {}
     for t in full_blueprint.get("topics", []):

@@ -26,6 +26,8 @@ _PREGEN_PROMPT = """
 
 
 def run(state: ExamState) -> dict:
+    """Generate one shared scenario per question group BEFORE Professor B writes sub-questions.
+    This ensures all sub-questions in a group are grounded in the same realistic context."""
     logger.section("STEP 2.6 — Scenario Pre-Generation")
 
     group_config = state.get("group_config", [])
@@ -40,6 +42,7 @@ def run(state: ExamState) -> dict:
         gid = gc["group_id"]
         topic_names = gc["topic_names"]
 
+        # Retrieve methodology slides for all topics in the group to inform scenario creation
         search_query = " ".join(topic_names) + " 방법론 절차 분석 적용"
         slides = retrieve(search_query, top_k=config.TOP_K)
         context = format_context(slides)
